@@ -91,7 +91,19 @@
       });
     } catch(e) {}
   };
-  const save = () => { try { localStorage.setItem(DB, JSON.stringify({thresholdMin: state.thresholdMin, externos: state.externos})); } catch(e){} };
+  const save = () => {
+    try {
+      localStorage.setItem(DB, JSON.stringify({ thresholdMin: state.thresholdMin, externos: state.externos }));
+    } catch (e) {}
+    // Notify external listeners that the horas externals data has changed. This allows the main
+    // application (app.js) to persist hours back into the BD file whenever the user edits
+    // the ledger or contracted hours. Guard against undefined.
+    try {
+      if (typeof window.onHorasExternosChange === 'function') {
+        window.onHorasExternosChange();
+      }
+    } catch (e) {}
+  };
   const load = () => { try { const raw = localStorage.getItem(DB); if (raw){ const o=JSON.parse(raw); state.thresholdMin=o.thresholdMin||state.thresholdMin; state.externos=o.externos||{}; } } catch(e){} };
 
   /**
@@ -205,20 +217,11 @@
   };
 
   // UI injection (robust): if nav.tabs not found, add a floating button
+  // We intentionally disable the automatic injection of the top-level folder selection toolbar
+  // (rv-toolbar) because the main application now provides its own controls to select a data
+  // directory and perform exports. Keeping two sets of controls was causing confusion and
+  // duplicate UI elements. The hours panel tab is still injected below.
   const ensureUI = () => {
-    // Toolbar
-    if (!q('#rv-toolbar')) {
-      const header = q('.topbar') || q('header') || q('nav.tabs') || document.body;
-      const div = document.createElement('div');
-      div.id = 'rv-toolbar';
-      div.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;';
-      div.innerHTML = '<button id="rv-pick">📁 Definir/Alterar pasta de dados</button><button id="rv-save">💾 Salvar agora na pasta</button><button id="rv-reload">🔄 Recarregar da pasta</button><span id="rv-folder-status" class="muted">Nenhuma pasta selecionada</span>';
-      header.parentNode.insertBefore(div, header.nextSibling);
-      q('#rv-pick').onclick = pickFolder;
-      q('#rv-save').onclick = () => { save(); saveToFolder(); };
-      q('#rv-reload').onclick = reloadFromFolder;
-      setFolderStatus();
-    }
     // Tab button
     let btn = q('#tab-horas-btn');
     if (!btn) {
@@ -704,4 +707,157 @@
       if (p && p.classList.contains('active')) render();
     }, 300);
   });
+
+  /*
+   * Expose helpers on the window object so the main application can
+   * synchronize the Gestão de Horas (Externos) data into the BD file.  The
+   * functions below allow reading the current ledger entries and replacing
+   * the ledger with new data loaded from a BD.  They intentionally avoid
+   * exposing or modifying other parts of the internal `state` such as
+   * contracted hours and selected days of the week, since those are
+   * application-specific. If you need to persist contracted minutes or
+   * day-of-week availability, you can extend these helpers accordingly.
+   */
+  try {
+    // Returns a flat array of ledger entries. Each entry contains: id, date, minutos, tipo, projeto.
+    window.getHorasExternosData = () => {
+      const list = [];
+      try {
+        Object.keys(state.externos || {}).forEach(id => {
+          const ext = state.externos[id];
+          if (!ext) return;
+          (ext.ledger || []).forEach(item => {
+            list.push({ id, date: item.date, minutos: item.minutos, tipo: item.tipo || '', projeto: item.projeto || '' });
+          });
+        });
+      } catch (e) {}
+      return list;
+    };
+    // Accepts a flat array of ledger entries and rebuilds the externos ledger. Each entry
+    // should provide id (resource identifier), date, minutos (number of minutes), tipo and projeto.
+    window.setHorasExternosData = (entries = []) => {
+      try {
+        const newExternos = {};
+        entries.forEach(ent => {
+          const id = ent.id || ent.resourceId || ent.colaborador || '';
+          if (!id) return;
+          if (!newExternos[id]) {
+            newExternos[id] = { dias: {seg:true,ter:true,qua:true,qui:true,sex:true,sab:false,dom:false}, horasDiaMin: 0, ledger: [], projetos: {} };
+          }
+          newExternos[id].ledger.push({ date: ent.date, minutos: Number(ent.minutos) || 0, tipo: ent.tipo || '', projeto: ent.projeto || '' });
+        });
+        state.externos = newExternos;
+        save();
+        // Re-render if the panel is visible
+        if (typeof render === 'function') {
+          render();
+        }
+      } catch (e) {}
+    };
+    // Provide a default no-op for the onHorasExternosChange callback if not already defined.
+    if (typeof window.onHorasExternosChange !== 'function') {
+      window.onHorasExternosChange = null;
+    }
+
+    /**
+     * Returns a list of configuration objects for each externo resource. Each configuration
+     * entry contains the resource id, the contracted hours per day (horasDia) formatted
+     * as HH:MM, a comma-separated string of working days (dias), and a semicolon-separated
+     * list of project definitions (projeto:HH:MM). These configurations are used when
+     * persisting and restoring the Gestão de Horas settings to and from the BD file.
+     */
+    window.getHorasExternosConfig = () => {
+      const list = [];
+      try {
+        Object.keys(state.externos || {}).forEach(id => {
+          const ext = state.externos[id];
+          if (!ext) return;
+          // Build list of working days in order
+          const diasArr = [];
+          ['seg','ter','qua','qui','sex','sab','dom'].forEach(d => {
+            if (ext.dias && ext.dias[d]) diasArr.push(d);
+          });
+          // Build list of project:hours pairs
+          const projPairs = [];
+          if (ext.projetos && typeof ext.projetos === 'object') {
+            Object.keys(ext.projetos).forEach(name => {
+              const p = ext.projetos[name];
+              const min = p && typeof p.contratadoMin === 'number' ? p.contratadoMin : 0;
+              projPairs.push(name + ':' + fmtHHMM(min));
+            });
+          }
+          list.push({
+            id: id,
+            horasDia: fmtHHMM(ext.horasDiaMin || 0),
+            dias: diasArr.join(','),
+            projetos: projPairs.join(';')
+          });
+        });
+      } catch (e) {}
+      return list;
+    };
+
+    /**
+     * Accepts a list of configuration objects and applies them to the internal state. Each
+     * configuration entry should provide an id, horasDia (string in HH:MM or decimal),
+     * dias (comma/semicolon-separated list of day codes) and projetos (semicolon-separated
+     * list of project:HH:MM definitions). Missing resources will be created if needed.
+     * After applying, the state is saved and the UI re-rendered.
+     */
+    window.setHorasExternosConfig = (cfgList = []) => {
+      try {
+        cfgList.forEach(cfg => {
+          const id = cfg.id || cfg.resourceId || cfg.colaborador || '';
+          if (!id) return;
+          if (!state.externos[id]) {
+            // initialize structure if missing
+            state.externos[id] = {
+              dias: {seg:true,ter:true,qua:true,qui:true,sex:true,sab:false,dom:false},
+              horasDiaMin: 0,
+              ledger: [],
+              projetos: {}
+            };
+          }
+          const ext = state.externos[id];
+          // horasDia
+          const hd = cfg.horasDia || cfg.horasdia || cfg.horasDiaMin || '';
+          let mins = 0;
+          if (typeof hd === 'number') {
+            mins = hd;
+          } else if (hd) {
+            mins = parseHHMM(hd);
+          }
+          ext.horasDiaMin = mins;
+          // dias
+          const diasStr = cfg.dias || cfg.Dias || cfg.dia || '';
+          const diasObj = {seg:false,ter:false,qua:false,qui:false,sex:false,sab:false,dom:false};
+          if (typeof diasStr === 'string' && diasStr.trim()) {
+            diasStr.split(/[,;]/).forEach(d => {
+              const dd = d.trim().toLowerCase();
+              if (['seg','ter','qua','qui','sex','sab','dom'].includes(dd)) diasObj[dd] = true;
+            });
+          }
+          ext.dias = diasObj;
+          // projetos
+          const projStr = cfg.projetos || cfg.Projetos || '';
+          const projObj = {};
+          if (typeof projStr === 'string' && projStr.trim()) {
+            projStr.split(';').forEach(part => {
+              if (!part) return;
+              const idx = part.indexOf(':');
+              if (idx < 0) return;
+              const name = part.slice(0, idx).trim();
+              const val = part.slice(idx + 1).trim();
+              if (!name) return;
+              const dur = parseHHMM(val);
+              projObj[name] = { contratadoMin: dur };
+            });
+          }
+          ext.projetos = projObj;
+        });
+        save();
+        if (typeof render === 'function') render();
+      } catch (e) {}
+    };
+  } catch (e) {}
 })();

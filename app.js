@@ -46,6 +46,17 @@ const FSA_DB="planner_fs";
 const FSA_STORE="handles";
 let dirHandle=null;
 
+// === Banco de Dados (BD) ===
+// Quando o usuário seleciona um arquivo BD (Excel/CSV) com permissão de escrita usando
+// showOpenFilePicker, armazenamos o FileSystemFileHandle em `bdHandle` e guardamos
+// informações auxiliares como a extensão e o nome para gerar mensagens e definir o tipo
+// de saída (HTML ou CSV). Se definido, todas as alterações em recursos, atividades ou
+// horas externas serão gravadas automaticamente neste arquivo via saveBD().
+let bdHandle = null;
+let bdFileExt = '';
+let bdFileName = '';
+let _saveBDTimer = null;
+
 async function hasFSA(){ return 'showDirectoryPicker' in window; }
 
 async function fsaLoadHandle(){
@@ -149,19 +160,34 @@ saveLS = function(k,v){
 
 // ===== Dados iniciais =====
 const today=clampDate(new Date());
-const sampleResources=[
-  {id:uuid(),nome:"Rafael",tipo:"Interno",senioridade:"Sr",ativo:true,capacidade:100,inicioAtivo:"",fimAtivo:""},
-  {id:uuid(),nome:"Anna",tipo:"Externo",senioridade:"Pl",ativo:true,capacidade:100,inicioAtivo:"",fimAtivo:""},
-  {id:uuid(),nome:"Maycon",tipo:"Interno",senioridade:"Sr",ativo:true,capacidade:50,inicioAtivo:"",fimAtivo:""} // exemplo part-time
-];
-const sampleActivities=[
-  {id:uuid(),titulo:"Implantação Bula Digital",resourceId:sampleResources[2].id,inicio:toYMD(addDays(today,-5)),fim:toYMD(addDays(today,6)),status:"Em Execução",alocacao:100},
-  {id:uuid(),titulo:"Quarentena — Ajustes",resourceId:sampleResources[0].id,inicio:toYMD(addDays(today,1)),fim:toYMD(addDays(today,10)),status:"Planejada",alocacao:50},
-  {id:uuid(),titulo:"Auditoria Interna",resourceId:sampleResources[1].id,inicio:toYMD(addDays(today,8)),fim:toYMD(addDays(today,15)),status:"Planejada",alocacao:100},
-];
+// Remover dados de exemplo: iniciar app com listas vazias quando não houver dados em localStorage.
+const sampleResources = [];
+const sampleActivities = [];
 
-let resources=loadLS(LS.res,sampleResources);
-let activities=loadLS(LS.act,sampleActivities);
+// Em versões antigas, o armazenamento local podia conter dados de exemplo. Para evitar
+// carregar registros antigos quando você abrir uma nova versão do app, utilize uma
+// chave de versão no localStorage. Ao detectar uma versão mais antiga, os dados
+// persistidos de recursos, atividades, trilhas e horas externas são removidos e
+// substituídos por listas vazias. Ajuste CUR_VERSION ao introduzir mudanças de
+// estrutura ou iniciar uma versão "limpa".
+try {
+  const VERSION_KEY = 'rv-version';
+  const CUR_VERSION = '3';
+  const storedV = localStorage.getItem(VERSION_KEY);
+  if (!storedV || storedV < CUR_VERSION) {
+    // Limpa dados persistidos das versões antigas (recursos, atividades, trilhas e horas)
+    localStorage.removeItem(LS.res);
+    localStorage.removeItem(LS.act);
+    localStorage.removeItem(LS.trail);
+    localStorage.removeItem('rv-enhancer-v1');
+    localStorage.setItem(VERSION_KEY, CUR_VERSION);
+  }
+} catch (e) {
+  // Ignorar erros de armazenamento (p. ex. quota exceeded)
+}
+
+let resources = loadLS(LS.res, sampleResources);
+let activities = loadLS(LS.act, sampleActivities);
 let trails=loadLS(LS.trail,{}); // { [atividadeId]: [{ts, oldInicio, oldFim, newInicio, newFim, justificativa, user}] }
 function saveTrails(){ saveLS(LS.trail, trails); }
 function addTrail(atividadeId, entry){
@@ -289,6 +315,8 @@ document.getElementById("btnSalvarRecurso").onclick=()=>{
   saveLS(LS.res,resources);
   dlgRecurso.close();
   renderAll();
+  // Salvar BD se houver arquivo selecionado
+  saveBDDebounced();
 };
 
 // ===== CRUD Atividade =====
@@ -366,6 +394,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
       saveLS(LS.act,activities);
       dlgAtividade.close();
       renderAll();
+      saveBDDebounced();
     }
   } else {
     // novo registro (não exige justificativa para criação)
@@ -373,6 +402,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     saveLS(LS.act,activities);
     dlgAtividade.close();
     renderAll();
+    saveBDDebounced();
   }
 };
 
@@ -397,6 +427,7 @@ btnJustConfirm.onclick=(e)=>{
   dlgJust.close();
   dlgAtividade.close();
   renderAll();
+  saveBDDebounced();
 };
 
 // ===== Tabelas =====
@@ -435,6 +466,8 @@ function renderTables(filteredActs){
       activities=activities.filter(a=>a.resourceId!==r.id);
       saveLS(LS.res,resources); saveLS(LS.act,activities);
       renderAll();
+      // Persistir alterações no BD
+      saveBDDebounced();
     };
     tblRecursos.appendChild(tr);
   });
@@ -497,6 +530,7 @@ function renderTables(filteredActs){
       activities=activities.filter(x=>x.id!==a.id);
       saveLS(LS.act,activities);
       renderAll();
+      saveBDDebounced();
     };
     tblAtividades.appendChild(tr);
   });
@@ -881,7 +915,8 @@ if(fileRestore) fileRestore.onchange=(ev)=>{
 };
 
 // ===== Importar CSV (recursos.csv e/ou atividades.csv) =====
-document.getElementById("fileImport").onchange=(ev)=>{
+const __fileImportEl = document.getElementById("fileImport");
+if(__fileImportEl) __fileImportEl.onchange=(ev)=>{
   const files=[...ev.target.files];
   if(!files.length) return;
   let pending=files.length;
@@ -1403,3 +1438,516 @@ function renderOverloadDetails(){
   wrap.style.display='';
   tbody.innerHTML = rows.map(r=>`<tr><td>${r.nome}</td><td>${r.periodo}</td><td>${r.atividades}</td></tr>`).join('');
 }
+
+// ===== BD por Excel/CSV (modelo único) =====
+let bdFileHandle = null;
+
+function updateBDStatus(msg){
+  const el = document.getElementById('bdStatus');
+  if(el) el.textContent = msg||'';
+}
+
+function parseHTMLExcelTables(htmlText){
+  const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+  const tRec = doc.querySelector('#Recursos') || doc.querySelector('table[data-name="Recursos"]') || doc.querySelector('table:nth-of-type(1)');
+  const tAtv = doc.querySelector('#Atividades') || doc.querySelector('table[data-name="Atividades"]') || doc.querySelector('table:nth-of-type(2)');
+  function tableToObjects(tbl){
+    if(!tbl) return [];
+    const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
+    if(rows.length===0) return [];
+    const headers=rows[0].map(h=>h.trim());
+    return rows.slice(1).filter(r=>r.some(v=>v && v.trim().length)).map(r=>{
+      const o={}; headers.forEach((h,i)=>o[h]=r[i]??''); return o;
+    });
+  }
+  return { recursos: tableToObjects(tRec), atividades: tableToObjects(tAtv) };
+}
+
+function coerceResource(r){
+  return {
+    id: String(r.id||r.ID||r.Id||''),
+    nome: r.nome||r.Nome||r.NOME||'',
+    tipo: (r.tipo||'').toLowerCase()||'interno',
+    senioridade: (r.senioridade||'NA'),
+    capacidade: Number(r.capacidade ?? r.Capacidade ?? 100),
+    ativo: String(r.ativo||'S').toUpperCase().startsWith('S'),
+    inicioAtivo: (r.inicioAtivo||r.InicioAtivo||r.inicio||'')||'',
+    fimAtivo: (r.fimAtivo||r.FimAtivo||r.fim||'')||''
+  };
+}
+
+function coerceActivity(a){
+  return {
+    id: String(a.id||a.ID||a.Id||''),
+    titulo: a.titulo||a.Titulo||a['TÍTULO']||'',
+    resourceId: String(a.resourceId||a.RecursoID||a.Recurso||a.resource||''),
+    inicio: (a.inicio||a.Inicio||a['Início']||''),
+    fim: (a.fim||a.Fim||''),
+    status: (a.status||'planejada'),
+    alocacao: Number(a.alocacao ?? a.Alocacao ?? 100)
+  };
+}
+
+function parseCSVUnico(text){
+  const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+  if(lines.length===0) return {recursos:[], atividades:[]};
+  const sep = lines[0].includes(';')?';':',';
+  const headers = lines[0].split(sep).map(h=>h.trim());
+  const rows = lines.slice(1).map(l=>{
+    const cols = l.split(sep).map(c=>c.trim().replace(/^"|"$/g,''));
+    const o={}; headers.forEach((h,i)=>o[h]=cols[i]||''); return o;
+  });
+  const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
+  const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
+  return {recursos, atividades};
+}
+
+/**
+ * Parse an Excel (HTML) BD file that contains up to three tables: Recursos,
+ * Atividades e HorasExternos. Returns an object with arrays of recursos,
+ * atividades e horas. Tabelas extras ou ausentes serão ignoradas.
+ */
+function parseHTMLBDTables(htmlText){
+  const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+  const tRec = doc.querySelector('#Recursos') || doc.querySelector('table[data-name="Recursos"]') || doc.querySelector('table:nth-of-type(1)');
+  const tAtv = doc.querySelector('#Atividades') || doc.querySelector('table[data-name="Atividades"]') || doc.querySelector('table:nth-of-type(2)');
+  // HorasExternos pode ser a terceira tabela ou ter id/data-name específico
+  const tHoras = doc.querySelector('#HorasExternos') || doc.querySelector('table[data-name="HorasExternos"]') || doc.querySelector('table:nth-of-type(3)');
+  function tableToObjects(tbl){
+    if(!tbl) return [];
+    const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
+    if(rows.length===0) return [];
+    const headers=rows[0].map(h=>h.trim());
+    return rows.slice(1).filter(r=>r.some(v=>v && v.trim().length)).map(r=>{
+      const o={}; headers.forEach((h,i)=>o[h]=r[i]??''); return o;
+    });
+  }
+  const recursos = tableToObjects(tRec);
+  const atividades = tableToObjects(tAtv);
+  const horasRows = tableToObjects(tHoras);
+  // Coerce horas: expects columns id, date (ou data), minutos ou horas, tipo, projeto
+  const horas = horasRows.map(h=>{
+    const id = h.id || h.ID || h.resourceId || h.RecursoID || h.colaborador || h.Colaborador || '';
+    const date = h.date || h.Date || h.data || h.Data || '';
+    let minutos = h.minutos || h.Minutos || h.horas || h.Horas || '';
+    // If minutos has HH:MM or decimal, convert to minutes; if plain integer treat as minutes
+    const parseStr = (s) => {
+      s = String(s||'').trim();
+      if(!s) return 0;
+      // Accept HH:MM with unlimited hours
+      const m = s.match(/^(\d+):(\d{2})$/);
+      if(m){ return parseInt(m[1],10)*60 + parseInt(m[2],10); }
+      // Accept decimal numbers only if contains dot or comma
+      if (s.includes('.') || s.includes(',')) {
+        const f = parseFloat(s.replace(',', '.'));
+        if(!isNaN(f)) return Math.round(f*60);
+      }
+      const n = parseInt(s,10);
+      return isNaN(n)?0:n;
+    };
+    minutos = parseStr(minutos);
+    const tipo = h.tipo || h.Tipo || '';
+    const projeto = h.projeto || h.Projeto || '';
+    return { id: String(id), date: date, minutos: minutos, tipo: tipo, projeto: projeto };
+  });
+  // Parse HorasExternosCfg table if present
+  const tCfg = doc.querySelector('#HorasExternosCfg') || doc.querySelector('table[data-name="HorasExternosCfg"]') || null;
+  let cfg = [];
+  if (tCfg) {
+    const cfgRows = tableToObjects(tCfg);
+    cfg = cfgRows.map(row => {
+      const rid = row.id || row.ID || row.resourceId || '';
+      const horasDia = row.horasDia || row.horasdia || row.horasDiaMin || row.horas_dia || row.horas_diarias || '';
+      const dias = row.dias || row.Dias || row.dia || '';
+      const projetos = row.projetos || row.Projetos || row.projeto_cfg || '';
+      return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
+    });
+  }
+  return { recursos, atividades, horas, cfg };
+}
+
+/**
+ * Parse a CSV único BD file that contains linhas para recurso, atividade e horas. Rows
+ * must have a coluna 'tabela' to classify tipo. Horas são identificadas
+ * pelo valor começando com 'hora'. Colunas esperadas: id/resourceId/colaborador,
+ * date/data, minutos/horas, tipo, projeto. Os valores de horas podem estar
+ * em HH:MM, decimal ou minutos.
+ */
+function parseCSVBDUnico(text){
+  const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+  if(lines.length===0) return {recursos:[], atividades:[], horas:[]};
+  const sep = lines[0].includes(';')?';':',';
+  const headers = lines[0].split(sep).map(h=>h.trim());
+  const rows = lines.slice(1).map(l=>{
+    // Preserve quoted values with commas/semicolons by splitting manually
+    const cols = [];
+    let cur = '';
+    let inQuote = false;
+    for(let i=0;i<l.length;i++){
+      const ch = l[i];
+      if(ch === '"') { inQuote = !inQuote; continue; }
+      if(!inQuote && ch === sep){ cols.push(cur.trim()); cur=''; continue; }
+      cur += ch;
+    }
+    cols.push(cur.trim());
+    const o={}; headers.forEach((h,i)=>o[h]=cols[i]||''); return o;
+  });
+  const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
+  const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
+  // Horas externas: linhas onde tabela começa com "hora" mas não hora_cfg
+  const horas = rows.filter(r => {
+    const tab = String(r.tabela || '').toLowerCase();
+    return tab.startsWith('hora') && !tab.startsWith('hora_cfg');
+  }).map(r => {
+    const id = r.id || r.resourceId || r.colaborador || r.Id || r.ID || '';
+    const date = r.date || r.Date || r.data || r.Data || '';
+    let minutos = r.minutos || r.Minutos || r.horas || r.Horas || '';
+    const parseStr = (s) => {
+      s = String(s || '').trim();
+      if (!s) return 0;
+      const m = s.match(/^(\d+):(\d{2})$/);
+      if (m) { return parseInt(m[1], 10) * 60 + parseInt(m[2], 10); }
+      // Only treat as decimal hours if contains dot or comma
+      if (s.includes('.') || s.includes(',')) {
+        const f = parseFloat(s.replace(',', '.'));
+        if (!isNaN(f)) return Math.round(f * 60);
+      }
+      const n = parseInt(s, 10);
+      return isNaN(n) ? 0 : n;
+    };
+    minutos = parseStr(minutos);
+    const tipo = r.tipo || r.Tipo || '';
+    const projeto = r.projeto || r.Projeto || '';
+    return { id: String(id), date: date, minutos: minutos, tipo: tipo, projeto: projeto };
+  });
+  // Configuration (hora_cfg) rows
+  const cfg = rows.filter(r => String(r.tabela || '').toLowerCase().startsWith('hora_cfg')).map(r => {
+    const rid = r.id || r.Id || r.resourceId || '';
+    const horasDia = r.horasDia || r.horasdia || r.horasDiaMin || r.horas_dia || '';
+    const dias = r.dias || r.Dias || r.dia || '';
+    const projetos = r.projetos || r.Projetos || '';
+    return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
+  });
+  return { recursos, atividades, horas, cfg };
+}
+
+// === Persistência do BD selecionado ===
+/**
+ * Salva os dados atuais de recursos, atividades e horas externos no arquivo BD selecionado.
+ * Suporta formatos HTML (xls compatível) e CSV único. Se nenhuma handle foi selecionada,
+ * a função retorna sem efeito. Erros de permissão são tratados silenciosamente e
+ * reportados no console. O status é atualizado via updateBDStatus.
+ */
+async function saveBD() {
+  if (!bdHandle) return;
+  try {
+    // Montar conteúdo conforme a extensão do arquivo
+    let content = '';
+    let mime = '';
+    // Obter horas externas e configurações atuais
+    let horasList = [];
+    let cfgList = [];
+    try {
+      if (typeof window.getHorasExternosData === 'function') {
+        const out = window.getHorasExternosData();
+        if (Array.isArray(out)) horasList = out;
+      }
+    } catch(e){}
+    try {
+      if (typeof window.getHorasExternosConfig === 'function') {
+        const outCfg = window.getHorasExternosConfig();
+        if (Array.isArray(outCfg)) cfgList = outCfg;
+      }
+    } catch(e){}
+    if (bdFileExt === 'csv') {
+      // CSV único com coluna tabela. Adicionamos colunas extras para configuração.
+      const header = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos'];
+      const rows = [];
+      // Recursos
+      resources.forEach(r => {
+        rows.push({
+          tabela:'recurso', id:r.id, nome:r.nome, tipo:r.tipo, senioridade:r.senioridade,
+          capacidade:r.capacidade, ativo:r.ativo?'S':'N', inicioAtivo:r.inicioAtivo||'', fimAtivo:r.fimAtivo||'',
+          titulo:'', resourceId:'', inicio:'', fim:'', status:'', alocacao:'', date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:''
+        });
+      });
+      // Atividades
+      activities.forEach(a => {
+        rows.push({
+          tabela:'atividade', id:a.id, nome:'', tipo:'', senioridade:'', capacidade:'', ativo:'', inicioAtivo:'', fimAtivo:'',
+          titulo:a.titulo, resourceId:a.resourceId, inicio:a.inicio, fim:a.fim, status:a.status, alocacao:a.alocacao,
+          date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:''
+        });
+      });
+      // Horas
+      horasList.forEach(h => {
+        rows.push({
+          tabela:'hora_externo', id:h.id, nome:'', tipo:'', senioridade:'', capacidade:'', ativo:'', inicioAtivo:'', fimAtivo:'',
+          titulo:'', resourceId:'', inicio:'', fim:'', status:'', alocacao:'',
+          date:h.date || '', minutos:h.minutos, tipoHora:h.tipo || '', projeto:h.projeto || '', horasDia:'', dias:'', projetos:''
+        });
+      });
+      // Configurações
+      cfgList.forEach(cfg => {
+        rows.push({
+          tabela:'hora_cfg', id:cfg.id, nome:'', tipo:'', senioridade:'', capacidade:'', ativo:'', inicioAtivo:'', fimAtivo:'',
+          titulo:'', resourceId:'', inicio:'', fim:'', status:'', alocacao:'', date:'', minutos:'', tipoHora:'', projeto:'',
+          horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || ''
+        });
+      });
+      // Converter rows para CSV
+      const csvRows = [];
+      csvRows.push(header.join(','));
+      rows.forEach(row => {
+        const vals = header.map(h => {
+          let v = row[h] || '';
+          // Escape double quotes and wrap with quotes if contains separator or quotes
+          const needsQuote = String(v).includes(',') || String(v).includes(';') || String(v).includes('"');
+          v = String(v).replace(/"/g, '""');
+          return needsQuote ? '"'+v+'"' : v;
+        });
+        csvRows.push(vals.join(','));
+      });
+      content = csvRows.join('\n');
+      mime = 'text/csv;charset=utf-8';
+    } else {
+      // HTML (xls compatível) com três tabelas: Recursos, Atividades, HorasExternos e HorasExternosCfg
+      function tableHTML(title, headers, rows) {
+        const thead = headers.map(h => `<th>${h}</th>`).join('');
+        const tbody = rows.map(r => `<tr>${headers.map(h => `<td>${r[h] ?? ''}</td>`).join('')}</tr>`).join('');
+        return `<h3>${title}</h3><table id='${title}' data-name='${title}' border='1'><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`;
+      }
+      // Recursos table
+      const headersRec = ['id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo'];
+      const recRows = resources.map(r => ({
+        id:r.id, nome:r.nome, tipo:r.tipo, senioridade:r.senioridade, capacidade:r.capacidade, ativo:r.ativo?'S':'N', inicioAtivo:r.inicioAtivo||'', fimAtivo:r.fimAtivo||''
+      }));
+      // Atividades table
+      const headersAtv = ['id','titulo','resourceId','inicio','fim','status','alocacao'];
+      const atvRows = activities.map(a => ({
+        id:a.id, titulo:a.titulo, resourceId:a.resourceId, inicio:a.inicio, fim:a.fim, status:a.status, alocacao:a.alocacao
+      }));
+      // HorasExternos table
+      const headersHoras = ['id','date','minutos','tipo','projeto'];
+      const horasRows = horasList.map(h => ({ id:h.id, date:h.date || '', minutos:h.minutos, tipo:h.tipo || '', projeto:h.projeto || '' }));
+      // HorasExternosCfg table
+      const headersCfg = ['id','horasDia','dias','projetos'];
+      const cfgRows = cfgList.map(cfg => ({ id: cfg.id, horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || '' }));
+      content = `<!doctype html><html><head><meta charset='utf-8'><title>BD</title></head><body>`+
+        tableHTML('Recursos', headersRec, recRows) +
+        tableHTML('Atividades', headersAtv, atvRows) +
+        tableHTML('HorasExternos', headersHoras, horasRows) +
+        tableHTML('HorasExternosCfg', headersCfg, cfgRows) +
+        `</body></html>`;
+      mime = 'text/html;charset=utf-8';
+    }
+    // Gravar no arquivo via FileSystemWritableFileStream
+    const writable = await bdHandle.createWritable();
+    await writable.write(new Blob([content], { type: mime }));
+    await writable.close();
+    updateBDStatus('Salvo em ' + (bdFileName || 'BD'));
+  } catch (e) {
+    console.error('Erro ao salvar BD:', e);
+    updateBDStatus('Erro ao salvar BD');
+  }
+}
+
+// Debounce salvar BD para evitar gravações consecutivas em alta frequência
+function saveBDDebounced() {
+  if (!bdHandle) return;
+  clearTimeout(_saveBDTimer);
+  _saveBDTimer = setTimeout(() => { saveBD(); }, 1000);
+}
+
+// Registrar callback para alterações de horas externas (Gestão de Horas). O enhancer2.js
+// chama window.onHorasExternosChange() sempre que as horas são salvas. Aqui
+// simplesmente disparamos a persistência do BD com debounce.
+if (typeof window !== 'undefined') {
+  try {
+    window.onHorasExternosChange = () => {
+      saveBDDebounced();
+    };
+  } catch(e){}
+}
+
+// Handle BD file input
+const fileBD = document.getElementById('fileBD');
+if(fileBD){
+  fileBD.onchange = async (ev)=>{
+    const f = ev.target.files && ev.target.files[0];
+    if(!f) return;
+    try{
+      const ext = f.name.toLowerCase().split('.').pop();
+      const text = await f.text();
+      if(ext==='csv'){
+        const parsed = parseCSVBDUnico(text);
+        resources = (parsed.recursos || []).map(coerceResource);
+        activities = (parsed.atividades || []).map(coerceActivity);
+        if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
+        if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
+      } else {
+        const parsed = parseHTMLBDTables(text);
+        resources = (parsed.recursos || []).map(coerceResource);
+        activities = (parsed.atividades || []).map(coerceActivity);
+        if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
+        if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
+      }
+      saveLS(LS.res, resources);
+      saveLS(LS.act, activities);
+      renderAll();
+      updateBDStatus('BD carregado: '+ f.name);
+    } catch(e){ alert('Erro ao ler arquivo BD: '+ e.message); }
+  };
+}
+
+// Pasta de dados (atalho no bloco de BD)
+const btnSelectDirInBD = document.getElementById('btnSelectDirInBD');
+if(btnSelectDirInBD){
+  btnSelectDirInBD.onclick = async ()=>{
+    try{
+      const h = await window.showDirectoryPicker();
+      if(!h) return;
+      dirHandle = h;
+      await idbSet(FSA_DB, FSA_STORE, 'dir', h);
+      updateBDStatus('Pasta selecionada ✓ — Salvo');
+      try{ await verifyPerm(dirHandle); }catch(e){}
+    }catch(e){
+      alert('Não foi possível selecionar a pasta.\nDica: abra pelo Chrome/Edge via http(s):// em vez de file://');
+      console.warn(e);
+    }
+  };
+}
+
+// Selecionar arquivo BD com permissão de escrita (File System Access API)
+const btnPickBDFile = document.getElementById('btnPickBDFile');
+if(btnPickBDFile){
+  btnPickBDFile.onclick = async () => {
+    if (!('showOpenFilePicker' in window)) {
+      alert('Seu navegador não suporta a abertura de arquivos com permissão de gravação. Use o Chrome/Edge via http(s)://');
+      return;
+    }
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        multiple: false,
+        types: [
+          {
+            description: 'Arquivos de Banco de Dados',
+            accept: {
+              'application/vnd.ms-excel': ['.xls', '.html'],
+              'text/csv': ['.csv'],
+              'text/plain': ['.csv']
+            }
+          }
+        ]
+      });
+      if (!handle) return;
+      bdHandle = handle;
+      // Determine nome e extensão
+      const file = await handle.getFile();
+      bdFileName = file.name || '';
+      bdFileExt = (bdFileName.split('.').pop() || '').toLowerCase();
+      // Ler conteúdo inicial
+      const text = await file.text();
+      let parsed;
+      if (bdFileExt === 'csv') {
+        parsed = parseCSVBDUnico(text);
+      } else {
+        parsed = parseHTMLBDTables(text);
+      }
+      resources = (parsed.recursos || []).map(coerceResource);
+      activities = (parsed.atividades || []).map(coerceActivity);
+      if (parsed.horas && typeof window.setHorasExternosData === 'function') {
+        window.setHorasExternosData(parsed.horas);
+      }
+      if (parsed.cfg && typeof window.setHorasExternosConfig === 'function') {
+        window.setHorasExternosConfig(parsed.cfg);
+      }
+      saveLS(LS.res, resources);
+      saveLS(LS.act, activities);
+      renderAll();
+      updateBDStatus('BD carregado e pronto: ' + bdFileName);
+    } catch (e) {
+      if (e && e.name !== 'AbortError') {
+        alert('Erro ao abrir arquivo BD: ' + e.message);
+      }
+    }
+  };
+}
+
+async function ensureDirOrAsk(){
+  if(dirHandle) return true;
+  try{
+    const h = await window.showDirectoryPicker();
+    if(!h) return false;
+    dirHandle = h;
+    await idbSet(FSA_DB, FSA_STORE, 'dir', h);
+    updateBDStatus('Pasta selecionada ✓ — Salvo');
+    return true;
+  }catch(e){
+    alert('Defina a pasta de dados para salvar o modelo.');
+    return false;
+  }
+}
+
+// Export model Excel
+const btnExportModeloXLS = document.getElementById('btnExportModeloXLS');
+if(btnExportModeloXLS){
+  btnExportModeloXLS.onclick = () => {
+    // Gera um modelo de BD (Excel compatível) contendo tabelas de Recursos, Atividades e HorasExternos.
+    const headersRec = ['id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo'];
+    const headersAtv = ['id','titulo','resourceId','inicio','fim','status','alocacao'];
+    const headersHoras = ['id','date','minutos','tipo','projeto'];
+    const exampleRec = [{id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''}];
+    const exampleAtv = [{id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100}];
+    const exampleHoras = [{id:'R1',date:'2025-01-15',minutos:480,tipo:'trabalho',projeto:'Alca Analitico'}];
+    // Example configuration for HorasExternosCfg
+    const headersCfg = ['id','horasDia','dias','projetos'];
+    const exampleCfg = [{id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'}];
+    function table(title, headers, rows){
+      const thead = headers.map(h=>`<th>${h}</th>`).join('');
+      const tbody = rows.map(r=>`<tr>${headers.map(h=>`<td>${(r[h]??'')}</td>`).join('')}</tr>`).join('');
+      return `<h3>${title}</h3><table border='1'><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`;
+    }
+    const html = `<!doctype html><html><head><meta charset='utf-8'><title>Modelo BD</title></head><body>`+
+      table('Recursos', headersRec, exampleRec) +
+      table('Atividades', headersAtv, exampleAtv) +
+      table('HorasExternos', headersHoras, exampleHoras) +
+      table('HorasExternosCfg', headersCfg, exampleCfg) +
+      `</body></html>`;
+    // Utilize download() para salvar o arquivo diretamente via navegador (sem exigir seleção de pasta)
+    download('modelo_bd.xls', html, 'application/vnd.ms-excel');
+    alert('Modelo de BD (Excel) gerado: modelo_bd.xls');
+  };
+}
+
+// Export model CSV
+const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
+if(btnExportModeloCSV){
+  btnExportModeloCSV.onclick = () => {
+    // Gera um modelo de BD em formato CSV único com coluna "tabela".
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos'];
+    const sample = [
+      {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:'',titulo:'',resourceId:'',inicio:'',fim:'',status:'',alocacao:'',date:'',minutos:'',tipoHora:'',projeto:'',horasDia:'',dias:'',projetos:''},
+      {tabela:'atividade',id:'A1',nome:'',tipo:'',senioridade:'',capacidade:'',ativo:'',inicioAtivo:'',fimAtivo:'',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100,date:'',minutos:'',tipoHora:'',projeto:'',horasDia:'',dias:'',projetos:''},
+      {tabela:'hora_externo',id:'R1',nome:'',tipo:'',senioridade:'',capacidade:'',ativo:'',inicioAtivo:'',fimAtivo:'',titulo:'',resourceId:'',inicio:'',fim:'',status:'',alocacao:'',date:'2025-01-15',minutos:480,tipoHora:'trabalho',projeto:'Alca Analitico',horasDia:'',dias:'',projetos:''},
+      {tabela:'hora_cfg',id:'R1',nome:'',tipo:'',senioridade:'',capacidade:'',ativo:'',inicioAtivo:'',fimAtivo:'',titulo:'',resourceId:'',inicio:'',fim:'',status:'',alocacao:'',date:'',minutos:'',tipoHora:'',projeto:'',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'}
+    ];
+    const rows = [headers.join(',')];
+    sample.forEach(obj => {
+      const line = headers.map(h => {
+        const v = obj[h] ?? '';
+        // Envolver valores em aspas e escapar aspas internas
+        return '"' + String(v).replace(/"/g, '""') + '"';
+      }).join(',');
+      rows.push(line);
+    });
+    const csv = rows.join('\n');
+    download('modelo_bd.csv', csv, 'text/csv;charset=utf-8');
+    alert('Modelo de BD (CSV único) gerado: modelo_bd.csv');
+  };
+}
+
+// Initialize BD status on load
+(() => {
+  if(dirHandle){ updateBDStatus('Pasta selecionada ✓ — Salvo'); }
+})();

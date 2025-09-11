@@ -228,27 +228,29 @@
         <h2>Exportações & Backup</h2>
         <div class="actions stack">
         <input id="currentUser" placeholder="Usuário atual (opcional)" class="userbox" />
-        <label class="btn">
-          Importar CSV
-          <input id="fileImport" type="file" accept=".csv" multiple class="hidden" />
-        </label>
+        <div class="inline-actions" id="bdControls">
+          <!-- Botão removido: a seleção de pasta será solicitada automaticamente quando necessário -->
+          <!-- Leitura: permite importar um BD (sem permissão de escrita) via input de arquivo. -->
+          <!-- Importar BD apenas para leitura. Use esta opção se desejar apenas visualizar os dados sem gravar mudanças no arquivo. -->
+          <label class="btn">📄 Importar BD (somente leitura)
+            <input id="fileBD" type="file" accept=".xls,.html,.csv" class="hidden" />
+          </label>
+          <!-- Selecionar BD com permissão de leitura e gravação. Esta é a opção recomendada para atualizar o arquivo em tempo real. -->
+          <button id="btnPickBDFile" class="btn">📄 Selecionar BD (ler/gravar)</button>
+          <button id="btnExportModeloXLS" class="btn">⬇️ Exportar modelo de BD (Excel)</button>
+          <button id="btnExportModeloCSV" class="btn">⬇️ Exportar modelo de BD (CSV único)</button>
+          <span id="bdStatus" class="muted"></span>
+        </div>
         <button id="btnExportCSV" class="btn">Exportar CSV (Recursos/Atividades)</button>
         <button id="btnExportXLS" class="btn">Exportar Excel (XLS compatível)</button>
         <button id="btnExportPBI" class="btn">Exportar CSV Power BI (diário)</button>
         <button id="btnHistAll" class="btn">Histórico (CSV consolidado)</button>
         <button id="btnBackup" class="btn">Backup (JSON)</button>
         <button id="btnExportPDF" class="btn primary">Exportar PDF (Visão Geral)</button>
-        <label class="btn">Restaurar
-          <input id="fileRestore" type="file" accept=".json" class="hidden" />
-        </label>
-        <div class="inline-actions" id="fsaControls">
-          <button id="btnPickFolder" class="btn">📁 Definir/Alterar pasta de dados</button>
-          <button id="btnSaveNow" class="btn">💾 Salvar agora na pasta</button>
-          <button id="btnReloadFromFolder" class="btn">🔄 Recarregar da pasta</button>
-          <span id="folderStatus" class="muted"></span>
-        </div>
+        <!-- Restaurar removido -->
+        <!-- Pasta de dados controls removidos (incorporados no bloco BD) -->
       </div>
-<p class="muted">Dica: use "Backup (JSON)" para salvar o estado e "Restaurar" para importar.</p>
+<p class="muted">Dica: para alimentar por planilha, use "Selecionar BD (ler/gravar)" e o "Modelo de BD (Excel/CSV)". Se você usar "Importar BD (somente leitura)", as alterações não serão salvas no arquivo.</p>
       </section>
     </div>
 
