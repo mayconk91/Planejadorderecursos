@@ -155,19 +155,19 @@
       state.folder = h;
       setFolderStatus();
       await saveToFolder();
-      try{ await enhStartWatcher(); }catch(e){}
+      // Carrega dados existentes da pasta para não sobrescrever o outro usuário
+      try { await reloadFromFolder(); } catch(e) {}
+      // Inicia observador para sincronizar dados em tempo real de outras sessões
+      startEnhancerWatcher();
     } catch(e){ if (e && e.name!=='AbortError') alert('Falha: '+e.message); }
   };
   const saveToFolder = async () => {
-    __enhSaving = true;
     if (!state.folder) return;
     const fh = await state.folder.getFileHandle('dados_enhancer.json', {create:true});
     const w = await fh.createWritable();
     await w.write(JSON.stringify({thresholdMin: state.thresholdMin, externos: state.externos}));
     await w.close();
     setFolderStatus('Salvo');
-    try{ __enhMTime = await enhGetMTime(); }catch(e){}
-    __enhSaving = false;
   };
   const reloadFromFolder = async () => {
     if (!state.folder) return;
@@ -181,39 +181,48 @@
       save();
       render();
       setFolderStatus('Carregado');
-      try{ __enhMTime = await enhGetMTime(); }catch(e){}
     } catch(e){ alert('Falha ao carregar: '+e.message); }
   };
-  // --- Auto-sync cooperativo para 'dados_enhancer.json' ---
-  let __enhSaving = false;
-  let __enhWatchTimer = null;
-  let __enhMTime = 0;
-  const ENH_WATCH_MS = 3000;
-  async function enhGetMTime(){
-    if(!state.folder) return 0;
-    try{
-      const fh = await state.folder.getFileHandle('dados_enhancer.json', {create:true});
-      const f = await fh.getFile();
-      return f.lastModified || 0;
-    }catch(e){ return 0; }
-  }
-  async function enhStartWatcher(){
-    if(!state.folder) return;
-    try{ __enhMTime = await enhGetMTime(); }catch(e){ __enhMTime = 0; }
-    if(__enhWatchTimer) clearInterval(__enhWatchTimer);
-    __enhWatchTimer = setInterval(async()=>{
-      if(!state.folder || __enhSaving) return;
-      try{
-        const mt = await enhGetMTime();
-        if(mt && mt > __enhMTime){
-          await reloadFromFolder();
-          __enhMTime = mt;
-          setFolderStatus('Atualizado por outra sessão às ' + new Date().toLocaleTimeString());
-        }
-      }catch(e){ /* silencioso */ }
-    }, ENH_WATCH_MS);
-  }
 
+  // === Observador de arquivos para sincronização multiusuário ===
+  // Verifica periodicamente se o arquivo dados_enhancer.json foi alterado por outra sessão.
+  // Se detectada alteração (baseada em lastModified), recarrega os dados de thresholdMin e externos,
+  // salvando-os no localStorage e atualizando a UI. Utiliza um cache de timestamp para evitar
+  // recarregamentos redundantes.
+  let enhWatchTimer = null;
+  let enhLastSeen = null;
+  function startEnhancerWatcher() {
+    // limpa watcher anterior
+    if (enhWatchTimer) clearInterval(enhWatchTimer);
+    enhLastSeen = null;
+    if (!state.folder) return;
+    enhWatchTimer = setInterval(async () => {
+      try {
+        const fh = await state.folder.getFileHandle('dados_enhancer.json', { create: false });
+        const f = await fh.getFile();
+        const lm = f.lastModified;
+        if (!enhLastSeen || lm > enhLastSeen) {
+          enhLastSeen = lm;
+          const txt = await f.text();
+          let obj = {};
+          try { obj = JSON.parse(txt || '{}'); } catch (e) {}
+          const newExternos = obj.externos || {};
+          const newTh = obj.thresholdMin != null ? obj.thresholdMin : state.thresholdMin;
+          // Verifica se os dados realmente mudaram
+          if (JSON.stringify(newExternos) !== JSON.stringify(state.externos) || newTh !== state.thresholdMin) {
+            state.thresholdMin = newTh;
+            state.externos = newExternos;
+            // Persistir e re-renderizar
+            save();
+            render();
+            setFolderStatus('Atualizado por outra sessão às ' + new Date(lm).toLocaleTimeString());
+          }
+        }
+      } catch (e) {
+        // falha silenciosa; ignorar se arquivo não existir ou permissão negada
+      }
+    }, 3000);
+  }
 
   // Read resources from multiple sources to avoid blanks
   const getExternos = () => {
@@ -738,9 +747,9 @@
     // To avoid blank on first click due to not-yet-loaded resources, render anyway once:
     setTimeout(()=>{
       const p=q('#tab-horas-panel');
+      // Only render if the panel is currently active (visible)
       if (p && p.classList.contains('active')) render();
     }, 300);
-    try{ await enhStartWatcher(); }catch(e){}
   });
 
   /*

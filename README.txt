@@ -47,9 +47,3 @@ NOTA PDF (offline)
 ------------------
 - O botão **Exportar PDF** funciona com jsPDF/html2canvas se presentes no navegador.
 - Quando não disponíveis, usa **janela de impressão** (Ctrl+P) para permitir **Salvar como PDF** (100% offline).
-
-
-## Multiusuário (contorno)
-- Observa alterações nos arquivos da pasta compartilhada e recarrega automaticamente quando outra sessão salvar (polling ~3s).
-- Recursos/Atividades/Trilhas e Gestão de Horas (dados_enhancer.json) são observados.
-- Em conflitos simultâneos, prevalece o último salvamento.

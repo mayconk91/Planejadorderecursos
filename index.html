@@ -22,6 +22,8 @@
     <button class="tab active" data-tab="plan">Planejamento</button>
     <button class="tab" data-tab="exec">Visão Executiva</button>
     <button class="tab" data-tab="avail">Disponibilidade</button>
+    <!-- Nova aba para a calculadora de capacidade -->
+    <button class="tab" data-tab="cap">Capacidade</button>
     <button class="tab" data-tab="util">Exportações & Backup</button>
   </nav>
 
@@ -221,7 +223,15 @@
         </div>
       </section>
     </div>
-    
+
+    <!-- Nova aba de Capacidade: incorporamos a calculadora de capacidade como um iframe. -->
+    <div id="tab-cap" class="tabpanel">
+      <section class="panel">
+        <!-- iframe permite encapsular o conteúdo da calculadora sem interferir no restante da aplicação -->
+        <iframe src="capacidade_v4.html" style="width:100%; min-height:600px; border:none;" title="Calculadora de Capacidade"></iframe>
+      </section>
+    </div>
+
 
   <div id="tab-util" class="tabpanel">
       <section class="panel">

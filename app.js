@@ -46,6 +46,87 @@ const FSA_DB="planner_fs";
 const FSA_STORE="handles";
 let dirHandle=null;
 
+// === Observador (watcher) para sincronização multiusuário ===
+// Esses timers e estruturas controlam a detecção de alterações nos arquivos da pasta
+// compartilhada. Quando outra sessão do navegador salva `resources.json`,
+// `activities.json` ou `trails.json` na mesma pasta, o watcher recarrega os
+// dados em memória, atualiza o localStorage e redesenha a tela. A
+// detecção é feita via lastModified dos arquivos; se maior que o
+// timestamp previamente visto, a alteração é aplicada. Ao salvar
+// nossos dados via saveAllToFolder() usamos saveLS() e refletimos no
+// disco, portanto os watchers detectam e recarregam (sem efeitos
+// colaterais).
+let fsaWatchTimer = null;
+let fsaLastSeen = {};
+
+function startFsaWatcher() {
+  // Limpa watcher anterior, se houver
+  if (fsaWatchTimer) clearInterval(fsaWatchTimer);
+  fsaLastSeen = {};
+  // Só observa se houver pasta definida
+  if (!dirHandle) return;
+  fsaWatchTimer = setInterval(async () => {
+    // Para cada arquivo de dados, verifica se foi modificado
+    try {
+      for (const key of [LS.res, LS.act, LS.trail]) {
+        const fileName = DATAFILES[key];
+        let fh;
+        try {
+          fh = await dirHandle.getFileHandle(fileName, { create: false });
+        } catch (e) {
+          continue; // se não existir, ignorar
+        }
+        const file = await fh.getFile();
+        const lm = file.lastModified;
+        if (!fsaLastSeen[fileName] || lm > fsaLastSeen[fileName]) {
+          fsaLastSeen[fileName] = lm;
+          const text = await file.text();
+          let changed = false;
+          try {
+            // Parse JSON do arquivo para comparar sem considerar formatação
+            let data;
+            if (key === LS.trail) {
+              data = JSON.parse(text || '{}');
+            } else {
+              data = JSON.parse(text || '[]');
+            }
+            if (key === LS.res) {
+              if (JSON.stringify(resources) !== JSON.stringify(data)) {
+                resources = data;
+                saveLS(LS.res, resources);
+                changed = true;
+              }
+            } else if (key === LS.act) {
+              if (JSON.stringify(activities) !== JSON.stringify(data)) {
+                activities = data;
+                saveLS(LS.act, activities);
+                changed = true;
+              }
+            } else if (key === LS.trail) {
+              if (JSON.stringify(trails) !== JSON.stringify(data)) {
+                trails = data;
+                saveLS(LS.trail, trails);
+                changed = true;
+              }
+            }
+          } catch (e) {
+            // JSON inválido: ignorar alteração
+          }
+          if (changed) {
+            // Re-render e alerta de atualização
+            renderAll();
+            updateFolderStatus('Atualizado por outra sessão às ' + new Date(lm).toLocaleTimeString());
+            // Regravamos o BD (Excel/CSV) se houver, para manter consistência
+            try { saveBDDebounced(); } catch (e) {}
+          }
+        }
+      }
+    } catch (e) {
+      // falhas silenciosas
+    }
+  }, 3000);
+}
+
 // === Banco de Dados (BD) ===
 // Quando o usuário seleciona um arquivo BD (Excel/CSV) com permissão de escrita usando
 // showOpenFilePicker, armazenamos o FileSystemFileHandle em `bdHandle` e guardamos
@@ -56,6 +137,86 @@ let bdHandle = null;
 let bdFileExt = '';
 let bdFileName = '';
 let _saveBDTimer = null;
+
+// === Observador para o arquivo de Banco de Dados (Excel/CSV) ===
+// Permite que múltiplas sessões visualizem atualizações no mesmo BD sem precisar
+// recarregar manualmente. Quando outro usuário salva o BD, o watcher detecta
+// a alteração pelo timestamp `lastModified` e recarrega recursos, atividades
+// e horas externas a partir do arquivo. A comparação evita recarregamentos
+// desnecessários.
+let bdWatchTimer = null;
+let bdLastSeen = null;
+
+function startBDWatcher() {
+  // Cancela watcher anterior, se existir
+  if (bdWatchTimer) clearInterval(bdWatchTimer);
+  bdLastSeen = null;
+  // Só funciona se houver um handle aberto com permissão de leitura/gravação
+  if (!bdHandle) return;
+  bdWatchTimer = setInterval(async () => {
+    try {
+      // Recupera arquivo e data de modificação
+      const file = await bdHandle.getFile();
+      const lm = file.lastModified;
+      if (!bdLastSeen || lm > bdLastSeen) {
+        bdLastSeen = lm;
+        // Ler e parsear conforme a extensão
+        let parsed;
+        if (bdFileExt === 'csv') {
+          const txt = await file.text();
+          parsed = parseCSVBDUnico(txt);
+        } else {
+          const txt = await file.text();
+          parsed = parseHTMLBDTables(txt);
+        }
+        // Normalizar recursos e atividades
+        const newResources = (parsed.recursos || []).map(coerceResource);
+        const newActivities = (parsed.atividades || []).map(coerceActivity);
+        const newHoras = parsed.horas || [];
+        const newCfg = parsed.cfg || [];
+        let changed = false;
+        // Atualiza recursos se necessário
+        if (JSON.stringify(resources) !== JSON.stringify(newResources)) {
+          resources = newResources;
+          saveLS(LS.res, resources);
+          changed = true;
+        }
+        // Atualiza atividades se necessário
+        if (JSON.stringify(activities) !== JSON.stringify(newActivities)) {
+          activities = newActivities;
+          saveLS(LS.act, activities);
+          changed = true;
+        }
+        // Atualiza horas externas e configurações usando helpers do enhancer2
+        let horasChanged = false;
+        try {
+          if (typeof window.getHorasExternosData === 'function' && typeof window.setHorasExternosData === 'function') {
+            const curHoras = window.getHorasExternosData() || [];
+            if (JSON.stringify(curHoras) !== JSON.stringify(newHoras)) {
+              window.setHorasExternosData(newHoras);
+              horasChanged = true;
+            }
+          }
+        } catch(e) {}
+        try {
+          if (typeof window.getHorasExternosConfig === 'function' && typeof window.setHorasExternosConfig === 'function') {
+            const curCfg = window.getHorasExternosConfig() || [];
+            if (JSON.stringify(curCfg) !== JSON.stringify(newCfg)) {
+              window.setHorasExternosConfig(newCfg);
+              horasChanged = true;
+            }
+          }
+        } catch(e) {}
+        if (changed || horasChanged) {
+          renderAll();
+          updateBDStatus('Atualizado por outra sessão às ' + new Date(lm).toLocaleTimeString());
+        }
+      }
+    } catch (e) {
+      // Erros silenciosos (ex.: permissão negada, arquivo removido)
+    }
+  }, 3000);
+}
 
 async function hasFSA(){ return 'showDirectoryPicker' in window; }
 
@@ -76,7 +237,12 @@ async function fsaPickFolder(){
     await idbSet(FSA_DB,FSA_STORE,'dir',h);
     dirHandle=h;
     updateFolderStatus();
-    try{ await startFolderWatcher(); }catch(e){}
+    // Carregar dados imediatamente da nova pasta
+    try {
+      await loadAllFromFolder();
+    } catch(e) { /* ignore */ }
+    // Iniciar watcher de sincronização
+    startFsaWatcher();
     alert('Pasta definida: '+(h.name||'(sem nome)'));
   }catch(e){ if(e&&e.name!=='AbortError') alert('Não foi possível selecionar a pasta: '+e.message); }
 }
@@ -89,63 +255,21 @@ async function writeFile(handle, name, content){
 }
 
 async function readFile(handle, name){
-async function getMTime(handle, name){
-  try{
-    const fhandle = await handle.getFileHandle(name, {create:false});
-    const file = await fhandle.getFile();
-    return file.lastModified || 0;
-  }catch(e){ return 0; }
-}
-
-async function refreshMtimes(){
-  if(!dirHandle) return;
-  const names = Object.values(DATAFILES);
-  const map = {};
-  for(const n of names){
-    map[n] = await getMTime(dirHandle, n);
-  }
-  __mtimes = map;
-}
-
-async function startFolderWatcher(){
-  if(!dirHandle) return;
-  await refreshMtimes();
-  if(__watchTimer) clearInterval(__watchTimer);
-  __watchTimer = setInterval(async () => {
-    if(!dirHandle || __savingNow) return;
-    try{
-      const names = Object.values(DATAFILES);
-      let changed = false;
-      for(const n of names){
-        const mt = await getMTime(dirHandle, n);
-        if(mt && (!__mtimes[n] || mt > __mtimes[n])){
-          changed = true;
-          __mtimes[n] = mt;
-        }
-      }
-      if(changed){
-        await loadAllFromFolder();
-        updateFolderStatus('Atualizado por outra sessão às ' + new Date().toLocaleTimeString());
-      }
-    }catch(e){ /* silencioso */ }
-  }, WATCH_MS);
-}
-
   const fhandle = await handle.getFileHandle(name, {create:false});
   const file = await fhandle.getFile();
   const text = await file.text();
   return text;
 }
 
-async function saveAllToFolder(){ if(!dirHandle) return false; __savingNow = true; try{
+async function saveAllToFolder(){
+  if(!dirHandle) return false;
+  try{
     await writeFile(dirHandle, DATAFILES[LS.res], JSON.stringify(resources,null,2));
     await writeFile(dirHandle, DATAFILES[LS.act], JSON.stringify(activities,null,2));
     await writeFile(dirHandle, DATAFILES[LS.trail], JSON.stringify(trails,null,2));
     updateFolderStatus('Salvo em '+new Date().toLocaleTimeString());
-    await refreshMtimes();
-    __savingNow = false;
     return true;
-  }catch(e){ console.error(e); alert('Falha ao salvar na pasta: '+e.message); return false; } finally { __savingNow = false; }
+  }catch(e){ console.error(e); alert('Falha ao salvar na pasta: '+e.message); return false; }
 }
 
 async function loadAllFromFolder(){
@@ -166,12 +290,6 @@ async function loadAllFromFolder(){
 }
 
 function updateFolderStatus(extra){
-  // --- Auto-sync (multiusuário) ---
-  const WATCH_MS = 3000;            // intervalo do polling (ms)
-  let __watchTimer = null;          // setInterval id
-  let __mtimes = {};                // cache de lastModified por arquivo
-  let __savingNow = false;          // evita loop de reload durante gravação local
-
   const el=document.getElementById('folderStatus');
   if(!el) return;
   if(!dirHandle){ el.textContent='(nenhuma pasta definida)'; return; }
@@ -193,7 +311,8 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
     updateFolderStatus();
     if(dirHandle){
       try{ await loadAllFromFolder(); }catch{ /* ignore */ }
-      try{ await startFolderWatcher(); }catch{ /* ignore */ }
+      // Iniciar observação de mudanças em tempo real nos arquivos JSON da pasta
+      startFsaWatcher();
     }
   } else {
     const el=document.getElementById('folderStatus'); if(el) el.textContent='(navegador sem suporte de salvar em pasta — usando armazenamento do navegador)';
@@ -202,7 +321,10 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
 
 // Redirecionar persistência: salva em LS e também espelha para a pasta (best-effort)
 const _saveLS_orig = saveLS;
-saveLS = (function(){ const DEBOUNCE_MS = 600; let timer=null; return function(k,v){ _saveLS_orig(k,v); if(dirHandle){ try{ clearTimeout(timer); timer=setTimeout(()=>{ try{ saveAllToFolder(); }catch{} }, DEBOUNCE_MS); }catch{} } }; })();
+saveLS = function(k,v){
+  _saveLS_orig(k,v);
+  if(dirHandle) { try{ saveAllToFolder(); }catch{} }
+};
 
 
 // ===== Dados iniciais =====
@@ -1913,6 +2035,8 @@ if(btnPickBDFile){
       saveLS(LS.act, activities);
       renderAll();
       updateBDStatus('BD carregado e pronto: ' + bdFileName);
+      // Iniciar observação de alterações no arquivo BD
+      startBDWatcher();
     } catch (e) {
       if (e && e.name !== 'AbortError') {
         alert('Erro ao abrir arquivo BD: ' + e.message);
