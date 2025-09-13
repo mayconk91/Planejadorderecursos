@@ -76,6 +76,7 @@ async function fsaPickFolder(){
     await idbSet(FSA_DB,FSA_STORE,'dir',h);
     dirHandle=h;
     updateFolderStatus();
+    try{ await startFolderWatcher(); }catch(e){}
     alert('Pasta definida: '+(h.name||'(sem nome)'));
   }catch(e){ if(e&&e.name!=='AbortError') alert('Não foi possível selecionar a pasta: '+e.message); }
 }
@@ -88,21 +89,63 @@ async function writeFile(handle, name, content){
 }
 
 async function readFile(handle, name){
+async function getMTime(handle, name){
+  try{
+    const fhandle = await handle.getFileHandle(name, {create:false});
+    const file = await fhandle.getFile();
+    return file.lastModified || 0;
+  }catch(e){ return 0; }
+}
+
+async function refreshMtimes(){
+  if(!dirHandle) return;
+  const names = Object.values(DATAFILES);
+  const map = {};
+  for(const n of names){
+    map[n] = await getMTime(dirHandle, n);
+  }
+  __mtimes = map;
+}
+
+async function startFolderWatcher(){
+  if(!dirHandle) return;
+  await refreshMtimes();
+  if(__watchTimer) clearInterval(__watchTimer);
+  __watchTimer = setInterval(async () => {
+    if(!dirHandle || __savingNow) return;
+    try{
+      const names = Object.values(DATAFILES);
+      let changed = false;
+      for(const n of names){
+        const mt = await getMTime(dirHandle, n);
+        if(mt && (!__mtimes[n] || mt > __mtimes[n])){
+          changed = true;
+          __mtimes[n] = mt;
+        }
+      }
+      if(changed){
+        await loadAllFromFolder();
+        updateFolderStatus('Atualizado por outra sessão às ' + new Date().toLocaleTimeString());
+      }
+    }catch(e){ /* silencioso */ }
+  }, WATCH_MS);
+}
+
   const fhandle = await handle.getFileHandle(name, {create:false});
   const file = await fhandle.getFile();
   const text = await file.text();
   return text;
 }
 
-async function saveAllToFolder(){
-  if(!dirHandle) return false;
-  try{
+async function saveAllToFolder(){ if(!dirHandle) return false; __savingNow = true; try{
     await writeFile(dirHandle, DATAFILES[LS.res], JSON.stringify(resources,null,2));
     await writeFile(dirHandle, DATAFILES[LS.act], JSON.stringify(activities,null,2));
     await writeFile(dirHandle, DATAFILES[LS.trail], JSON.stringify(trails,null,2));
     updateFolderStatus('Salvo em '+new Date().toLocaleTimeString());
+    await refreshMtimes();
+    __savingNow = false;
     return true;
-  }catch(e){ console.error(e); alert('Falha ao salvar na pasta: '+e.message); return false; }
+  }catch(e){ console.error(e); alert('Falha ao salvar na pasta: '+e.message); return false; } finally { __savingNow = false; }
 }
 
 async function loadAllFromFolder(){
@@ -123,6 +166,12 @@ async function loadAllFromFolder(){
 }
 
 function updateFolderStatus(extra){
+  // --- Auto-sync (multiusuário) ---
+  const WATCH_MS = 3000;            // intervalo do polling (ms)
+  let __watchTimer = null;          // setInterval id
+  let __mtimes = {};                // cache de lastModified por arquivo
+  let __savingNow = false;          // evita loop de reload durante gravação local
+
   const el=document.getElementById('folderStatus');
   if(!el) return;
   if(!dirHandle){ el.textContent='(nenhuma pasta definida)'; return; }
@@ -144,6 +193,7 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
     updateFolderStatus();
     if(dirHandle){
       try{ await loadAllFromFolder(); }catch{ /* ignore */ }
+      try{ await startFolderWatcher(); }catch{ /* ignore */ }
     }
   } else {
     const el=document.getElementById('folderStatus'); if(el) el.textContent='(navegador sem suporte de salvar em pasta — usando armazenamento do navegador)';
@@ -152,10 +202,7 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
 
 // Redirecionar persistência: salva em LS e também espelha para a pasta (best-effort)
 const _saveLS_orig = saveLS;
-saveLS = function(k,v){
-  _saveLS_orig(k,v);
-  if(dirHandle) { try{ saveAllToFolder(); }catch{} }
-};
+saveLS = (function(){ const DEBOUNCE_MS = 600; let timer=null; return function(k,v){ _saveLS_orig(k,v); if(dirHandle){ try{ clearTimeout(timer); timer=setTimeout(()=>{ try{ saveAllToFolder(); }catch{} }, DEBOUNCE_MS); }catch{} } }; })();
 
 
 // ===== Dados iniciais =====
