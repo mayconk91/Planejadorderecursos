@@ -92,13 +92,13 @@ function startFsaWatcher() {
             }
             if (key === LS.res) {
               if (JSON.stringify(resources) !== JSON.stringify(data)) {
-                resources = (Array.isArray(data)?data:[]).map(coerceResource);
+                resources = data;
                 saveLS(LS.res, resources);
                 changed = true;
               }
             } else if (key === LS.act) {
               if (JSON.stringify(activities) !== JSON.stringify(data)) {
-                activities = (Array.isArray(data)?data:[]).map(coerceActivity);
+                activities = data;
                 saveLS(LS.act, activities);
                 changed = true;
               }
@@ -264,8 +264,8 @@ async function readFile(handle, name){
 async function saveAllToFolder(){
   if(!dirHandle) return false;
   try{
-    await writeFile(dirHandle, DATAFILES[LS.res], JSON.stringify((resources||[]).map(coerceResource),null,2));
-    await writeFile(dirHandle, DATAFILES[LS.act], JSON.stringify((activities||[]).map(coerceActivity),null,2));
+    await writeFile(dirHandle, DATAFILES[LS.res], JSON.stringify(resources,null,2));
+    await writeFile(dirHandle, DATAFILES[LS.act], JSON.stringify(activities,null,2));
     await writeFile(dirHandle, DATAFILES[LS.trail], JSON.stringify(trails,null,2));
     updateFolderStatus('Salvo em '+new Date().toLocaleTimeString());
     return true;
@@ -280,7 +280,7 @@ async function loadAllFromFolder(){
     const ttxt = await readFile(dirHandle, DATAFILES[LS.trail]).catch(e=>{ if(e && e.name==='NotFoundError') return '{}'; else throw e; });
     const r = JSON.parse(rtxt); const a = JSON.parse(atxt); const t = JSON.parse(ttxt);
     if(Array.isArray(r)&&Array.isArray(a)&&t&&typeof t==='object'){
-      resources=(r||[]).map(coerceResource); activities=(a||[]).map(coerceActivity); trails=t;
+      resources=r; activities=a; trails=t;
       saveLS(LS.res,resources); saveLS(LS.act,activities); saveLS(LS.trail,trails);
       renderAll();
       updateFolderStatus('Carregado da pasta');
@@ -356,7 +356,6 @@ try {
 }
 
 let resources = loadLS(LS.res, sampleResources);
-resources = (resources||[]).map(coerceResource);
 let activities = loadLS(LS.act, sampleActivities);
 let trails=loadLS(LS.trail,{}); // { [atividadeId]: [{ts, oldInicio, oldFim, newInicio, newFim, justificativa, user}] }
 function saveTrails(){ saveLS(LS.trail, trails); }
@@ -806,7 +805,7 @@ function renderGantt(filteredActs){
   // Render rows
   resources.forEach(r=>{
     // filtros
-    if(filtroTipo && r.tipo!==filtroTipo) return;
+    if(filtroTipo && (r.tipo||"").toLowerCase() !== filtroTipo.toLowerCase()) return;
     if(filtroSenioridade && r.senioridade!==filtroSenioridade) return;
     if(!r.ativo) return;
     const acts=byRes[r.id]||[];
@@ -944,7 +943,7 @@ function getFilteredActivities(){
     if(!selectedStatus.has((a.status||"").trim())) return false;
     const r=resources.find(x=>x.id===a.resourceId);
     if(!r) return false;
-    if(filtroTipo && r.tipo!==filtroTipo) return false;
+    if(filtroTipo && (r.tipo||"").toLowerCase() !== filtroTipo.toLowerCase()) return false;
     if(filtroSenioridade && r.senioridade!==filtroSenioridade) return false;
     if(buscaRecurso && !(r.nome||"").toLowerCase().includes(buscaRecurso)) return false;
     if(buscaTitulo && !a.titulo.toLowerCase().includes(buscaTitulo)) return false;
@@ -995,9 +994,6 @@ function tableHTML(name, rows, cols){
         xmlns:x="urn:schemas-microsoft-com:office:excel"
         xmlns="http://www.w3.org/TR/REC-html40">
   <head><meta charset="utf-8">
-  <!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>
-    <x:ExcelWorksheet><x:Name>${name}</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>
-  </x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
   </head><body>
     <table border="1"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
   </body></html>`;
@@ -1299,7 +1295,7 @@ renderStatusChips();
     const out = [];
     resources.forEach(r=>{
       if(!r.ativo) return;
-      if(tipo && r.tipo!==tipo) return;
+      if(tipo && (r.tipo||"").toLowerCase() !== tipo.toLowerCase()) return;
       if(sen && r.senioridade!==sen) return;
       const next = hasWindow(r, inicio, dias, uteis, percReq);
       if(next) out.push({recurso:r, inicio:next});
@@ -1634,22 +1630,16 @@ function parseHTMLExcelTables(htmlText){
 }
 
 function coerceResource(r){
-  const raw = String((r && (r.tipo||r.Tipo)) || '').trim().toLowerCase();
-  let tipo = 'Interno';
-  if (raw.startsWith('e')) tipo = 'Externo';
-  else if (raw.startsWith('i')) tipo = 'Interno';
-  const senior = String((r && (r.senioridade||r.Senioridade)) || 'NA').trim() || 'NA';
   return {
-    id: String((r && (r.id||r.ID||r.Id)) || ''),
-    nome: (r && (r.nome||r.Nome||r.NOME)) || '',
-    tipo: tipo,
-    senioridade: senior,
-    capacidade: Number(((r && (r.capacidade ?? r.Capacidade)) ?? 100)),
-    ativo: String(((r && (r.ativo||r.Ativo)) ?? 'S')).toUpperCase().startsWith('S'),
-    inicioAtivo: (r && (r.inicioAtivo||r.InicioAtivo||r.inicio)) || '',
-    fimAtivo: (r && (r.fimAtivo||r.FimAtivo||r.fim)) || ''
+    id: String(r.id||r.ID||r.Id||''),
+    nome: r.nome||r.Nome||r.NOME||'',
+    tipo: (r.tipo||'').toLowerCase()||'interno',
+    senioridade: (r.senioridade||'NA'),
+    capacidade: Number(r.capacidade ?? r.Capacidade ?? 100),
+    ativo: String(r.ativo||'S').toUpperCase().startsWith('S'),
+    inicioAtivo: (r.inicioAtivo||r.InicioAtivo||r.inicio||'')||'',
+    fimAtivo: (r.fimAtivo||r.FimAtivo||r.fim||'')||''
   };
-};
 }
 
 function coerceActivity(a){
