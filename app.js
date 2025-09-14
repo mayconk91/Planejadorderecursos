@@ -92,13 +92,13 @@ function startFsaWatcher() {
             }
             if (key === LS.res) {
               if (JSON.stringify(resources) !== JSON.stringify(data)) {
-                resources = data;
+                resources = (Array.isArray(data)?data:[]).map(coerceResource);
                 saveLS(LS.res, resources);
                 changed = true;
               }
             } else if (key === LS.act) {
               if (JSON.stringify(activities) !== JSON.stringify(data)) {
-                activities = data;
+                activities = (Array.isArray(data)?data:[]).map(coerceActivity);
                 saveLS(LS.act, activities);
                 changed = true;
               }
@@ -264,8 +264,8 @@ async function readFile(handle, name){
 async function saveAllToFolder(){
   if(!dirHandle) return false;
   try{
-    await writeFile(dirHandle, DATAFILES[LS.res], JSON.stringify(resources,null,2));
-    await writeFile(dirHandle, DATAFILES[LS.act], JSON.stringify(activities,null,2));
+    await writeFile(dirHandle, DATAFILES[LS.res], JSON.stringify((resources||[]).map(coerceResource),null,2));
+    await writeFile(dirHandle, DATAFILES[LS.act], JSON.stringify((activities||[]).map(coerceActivity),null,2));
     await writeFile(dirHandle, DATAFILES[LS.trail], JSON.stringify(trails,null,2));
     updateFolderStatus('Salvo em '+new Date().toLocaleTimeString());
     return true;
@@ -280,7 +280,7 @@ async function loadAllFromFolder(){
     const ttxt = await readFile(dirHandle, DATAFILES[LS.trail]).catch(e=>{ if(e && e.name==='NotFoundError') return '{}'; else throw e; });
     const r = JSON.parse(rtxt); const a = JSON.parse(atxt); const t = JSON.parse(ttxt);
     if(Array.isArray(r)&&Array.isArray(a)&&t&&typeof t==='object'){
-      resources=r; activities=a; trails=t;
+      resources=(r||[]).map(coerceResource); activities=(a||[]).map(coerceActivity); trails=t;
       saveLS(LS.res,resources); saveLS(LS.act,activities); saveLS(LS.trail,trails);
       renderAll();
       updateFolderStatus('Carregado da pasta');
@@ -356,6 +356,7 @@ try {
 }
 
 let resources = loadLS(LS.res, sampleResources);
+resources = (resources||[]).map(coerceResource);
 let activities = loadLS(LS.act, sampleActivities);
 let trails=loadLS(LS.trail,{}); // { [atividadeId]: [{ts, oldInicio, oldFim, newInicio, newFim, justificativa, user}] }
 function saveTrails(){ saveLS(LS.trail, trails); }
@@ -471,7 +472,7 @@ document.getElementById("btnSalvarRecurso").onclick=()=>{
   const rec={
     id:f["id"].value||uuid(),
     nome:f["nome"].value.trim(),
-    tipo:(function(v){v=String(v||"").trim().toLowerCase();return v.startsWith("ext")?"Externo":"Interno";})(f["tipo"].value),
+    tipo:f["tipo"].value,
     senioridade:f["senioridade"].value,
     ativo:f["ativo"].checked,
     capacidade:Math.max(1,Number(f["capacidade"].value||100)),
@@ -1632,19 +1633,21 @@ function parseHTMLExcelTables(htmlText){
   return { recursos: tableToObjects(tRec), atividades: tableToObjects(tAtv) };
 }
 
-function coerceResource(r) {
-  const rawTipo = String(r.tipo || r.Tipo || '').trim().toLowerCase();
-  const tipo = rawTipo.startsWith('ext') ? 'Externo' : 'Interno';
-  const senioridade = String(r.senioridade || r.Senioridade || 'NA').trim() || 'NA';
+function coerceResource(r){
+  const raw = String((r && (r.tipo||r.Tipo)) || '').trim().toLowerCase();
+  let tipo = 'Interno';
+  if (raw.startsWith('e')) tipo = 'Externo';
+  else if (raw.startsWith('i')) tipo = 'Interno';
+  const senior = String((r && (r.senioridade||r.Senioridade)) || 'NA').trim() || 'NA';
   return {
-    id: String(r.id || r.ID || r.Id || ''),
-    nome: r.nome || r.Nome || '',
+    id: String((r && (r.id||r.ID||r.Id)) || ''),
+    nome: (r && (r.nome||r.Nome||r.NOME)) || '',
     tipo: tipo,
-    senioridade: senioridade,
-    capacidade: Number(r.capacidade ?? r.Capacidade ?? 100),
-    ativo: String(r.ativo || r.Ativo || 'S').toUpperCase().startsWith('S'),
-    inicioAtivo: (r.inicioAtivo || r.InicioAtivo || r.inicio || '') || '',
-    fimAtivo: (r.fimAtivo || r.FimAtivo || r.fim || '') || ''
+    senioridade: senior,
+    capacidade: Number(((r && (r.capacidade ?? r.Capacidade)) ?? 100)),
+    ativo: String(((r && (r.ativo||r.Ativo)) ?? 'S')).toUpperCase().startsWith('S'),
+    inicioAtivo: (r && (r.inicioAtivo||r.InicioAtivo||r.inicio)) || '',
+    fimAtivo: (r && (r.fimAtivo||r.FimAtivo||r.fim)) || ''
   };
 };
 }
