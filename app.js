@@ -471,7 +471,7 @@ document.getElementById("btnSalvarRecurso").onclick=()=>{
   const rec={
     id:f["id"].value||uuid(),
     nome:f["nome"].value.trim(),
-    tipo:f["tipo"].value,
+    tipo:(function(v){ v=String(v||"").trim().toLowerCase(); return v.startswith("ext")?"Externo":"Interno";})(f["tipo"].value),
     senioridade:f["senioridade"].value,
     ativo:f["ativo"].checked,
     capacidade:Math.max(1,Number(f["capacidade"].value||100)),
@@ -1633,16 +1633,20 @@ function parseHTMLExcelTables(htmlText){
 }
 
 function coerceResource(r){
+  const raw = String(r.tipo||r.Tipo||r.TIPO||'').trim().toLowerCase();
+  const tipo = (raw.startsWith('ext')) ? 'Externo' : 'Interno';
+  const sen = String(r.senioridade||r.Senioridade||'NA').trim() || 'NA';
   return {
     id: String(r.id||r.ID||r.Id||''),
     nome: r.nome||r.Nome||r.NOME||'',
-    tipo: (r.tipo||'').toLowerCase()||'interno',
-    senioridade: (r.senioridade||'NA'),
+    tipo: tipo,
+    senioridade: sen,
     capacidade: Number(r.capacidade ?? r.Capacidade ?? 100),
-    ativo: String(r.ativo||'S').toUpperCase().startsWith('S'),
+    ativo: String(r.ativo||r.Ativo||'S').toUpperCase().startsWith('S'),
     inicioAtivo: (r.inicioAtivo||r.InicioAtivo||r.inicio||'')||'',
     fimAtivo: (r.fimAtivo||r.FimAtivo||r.fim||'')||''
   };
+};
 }
 
 function coerceActivity(a){
