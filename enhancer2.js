@@ -86,8 +86,7 @@
             if (!td.hasAttribute('data-label') && heads[i]) {
               td.setAttribute('data-label', heads[i]);
             }
-          */
-});
+          });
         });
       });
     } catch(e) {}
@@ -287,8 +286,10 @@
         document.body.appendChild(btn);
       }
 
-      // (leave guard removed to avoid interfering with app tabs)
-/* && !nav.__rvLeaveGuard) {
+      // Install a leave guard: when clicking on any other tab (not ours), remove the active
+      // state from our panel and our tab button. This avoids being locked in the hours tab.
+      const nav = q('nav.tabs');
+      if (nav && !nav.__rvLeaveGuard) {
         nav.__rvLeaveGuard = true;
         nav.addEventListener('click', (ev) => {
           const target = ev.target.closest('.tab');
