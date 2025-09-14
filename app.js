@@ -1633,16 +1633,21 @@ function parseHTMLExcelTables(htmlText){
 }
 
 function coerceResource(r){
+  // Canonicalize Tipo exactly as na UI: "Interno" / "Externo"
+  const raw = String(r.tipo || r.Tipo || r.TIPO || '').trim().toLowerCase();
+  const tipo = raw.startsWith('e') ? 'Externo' : (raw.startsWith('i') ? 'Interno' : 'Interno');
+  const senior = String(r.senioridade || r.Senioridade || 'NA').trim() || 'NA';
   return {
     id: String(r.id||r.ID||r.Id||''),
     nome: r.nome||r.Nome||r.NOME||'',
-    tipo: (r.tipo||'').toLowerCase()||'interno',
-    senioridade: (r.senioridade||'NA'),
+    tipo: tipo,
+    senioridade: senior,
     capacidade: Number(r.capacidade ?? r.Capacidade ?? 100),
     ativo: String(r.ativo||'S').toUpperCase().startsWith('S'),
     inicioAtivo: (r.inicioAtivo||r.InicioAtivo||r.inicio||'')||'',
     fimAtivo: (r.fimAtivo||r.FimAtivo||r.fim||'')||''
   };
+};
 }
 
 function coerceActivity(a){
