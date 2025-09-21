@@ -316,10 +316,13 @@
 
   function render(){
     const cont = q('#rv-externos'); if (!cont) return;
-    // --- MODIFICAÇÃO: Popula o textarea com data e legenda ---
     const feriadosTextarea = q('#rv-feriados');
     if (feriadosTextarea) {
-        feriadosTextarea.value = (state.feriados || []).map(f => `${f.date} ${f.legend}`.trim()).join('\n');
+        // MODIFICAÇÃO: Apenas atualiza o campo se o usuário não estiver digitando nele,
+        // para evitar que o "watcher" do BD apague o que está sendo inserido.
+        if (document.activeElement !== feriadosTextarea) {
+            feriadosTextarea.value = (state.feriados || []).map(f => `${f.date} ${f.legend}`.trim()).join('\n');
+        }
     }
 
     let recs = getExternos();
