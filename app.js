@@ -934,7 +934,7 @@ document.getElementById("btnExportCSV").onclick=()=>{
   alert("Exportados: recursos.csv e atividades.csv");
 };
 
-function tableHTML(name, rows, cols){
+function tableHTML(title, rows, cols){
   const header = cols.map(c=>`<th>${c}</th>`).join("");
   const body = rows.map(r=>`<tr>${cols.map(c=>`<td>${(r[c]??"")}</td>`).join("")}</tr>`).join("");
   return `
@@ -943,7 +943,7 @@ function tableHTML(name, rows, cols){
         xmlns="http://www.w3.org/TR/REC-html40">
   <head><meta charset="utf-8">
   </head><body>
-    <table border="1" id="${name}" data-name="${name}"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
+    <table border="1" id="${title}" data-name="${title}"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
   </body></html>`;
 }
 document.getElementById("btnExportXLS").onclick=()=>{
