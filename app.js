@@ -46,14 +46,27 @@ const FSA_DB="planner_fs";
 const FSA_STORE="handles";
 let dirHandle=null;
 
+// === Observador (watcher) para sincronização multiusuário ===
+// Esses timers e estruturas controlam a detecção de alterações nos arquivos da pasta
+// compartilhada. Quando outra sessão do navegador salva `resources.json`,
+// `activities.json` ou `trails.json` na mesma pasta, o watcher recarrega os
+// dados em memória, atualiza o localStorage e redesenha a tela. A
+// detecção é feita via lastModified dos arquivos; se maior que o
+// timestamp previamente visto, a alteração é aplicada. Ao salvar
+// nossos dados via saveAllToFolder() usamos saveLS() e refletimos no
+// disco, portanto os watchers detectam e recarregam (sem efeitos
+// colaterais).
 let fsaWatchTimer = null;
 let fsaLastSeen = {};
 
 function startFsaWatcher() {
+  // Limpa watcher anterior, se houver
   if (fsaWatchTimer) clearInterval(fsaWatchTimer);
   fsaLastSeen = {};
+  // Só observa se houver pasta definida
   if (!dirHandle) return;
   fsaWatchTimer = setInterval(async () => {
+    // Para cada arquivo de dados, verifica se foi modificado
     try {
       for (const key of [LS.res, LS.act, LS.trail]) {
         const fileName = DATAFILES[key];
@@ -61,7 +74,7 @@ function startFsaWatcher() {
         try {
           fh = await dirHandle.getFileHandle(fileName, { create: false });
         } catch (e) {
-          continue; 
+          continue; // se não existir, ignorar
         }
         const file = await fh.getFile();
         const lm = file.lastModified;
@@ -70,6 +83,7 @@ function startFsaWatcher() {
           const text = await file.text();
           let changed = false;
           try {
+            // Parse JSON do arquivo para comparar sem considerar formatação
             let data;
             if (key === LS.trail) {
               data = JSON.parse(text || '{}');
@@ -96,37 +110,57 @@ function startFsaWatcher() {
               }
             }
           } catch (e) {
+            // JSON inválido: ignorar alteração
           }
           if (changed) {
+            // Re-render e alerta de atualização
             renderAll();
             updateFolderStatus('Atualizado por outra sessão às ' + new Date(lm).toLocaleTimeString());
+            // Regravamos o BD (Excel/CSV) se houver, para manter consistência
             try { saveBDDebounced(); } catch (e) {}
           }
         }
       }
     } catch (e) {
+      // falhas silenciosas
     }
   }, 3000);
 }
 
+// === Banco de Dados (BD) ===
+// Quando o usuário seleciona um arquivo BD (Excel/CSV) com permissão de escrita usando
+// showOpenFilePicker, armazenamos o FileSystemFileHandle em `bdHandle` e guardamos
+// informações auxiliares como a extensão e o nome para gerar mensagens e definir o tipo
+// de saída (HTML ou CSV). Se definido, todas as alterações em recursos, atividades ou
+// horas externas serão gravadas automaticamente neste arquivo via saveBD().
 let bdHandle = null;
 let bdFileExt = '';
 let bdFileName = '';
 let _saveBDTimer = null;
 
+// === Observador para o arquivo de Banco de Dados (Excel/CSV) ===
+// Permite que múltiplas sessões visualizem atualizações no mesmo BD sem precisar
+// recarregar manualmente. Quando outro usuário salva o BD, o watcher detecta
+// a alteração pelo timestamp `lastModified` e recarrega recursos, atividades
+// e horas externas a partir do arquivo. A comparação evita recarregamentos
+// desnecessários.
 let bdWatchTimer = null;
 let bdLastSeen = null;
 
 function startBDWatcher() {
+  // Cancela watcher anterior, se existir
   if (bdWatchTimer) clearInterval(bdWatchTimer);
   bdLastSeen = null;
+  // Só funciona se houver um handle aberto com permissão de leitura/gravação
   if (!bdHandle) return;
   bdWatchTimer = setInterval(async () => {
     try {
+      // Recupera arquivo e data de modificação
       const file = await bdHandle.getFile();
       const lm = file.lastModified;
       if (!bdLastSeen || lm > bdLastSeen) {
         bdLastSeen = lm;
+        // Ler e parsear conforme a extensão
         let parsed;
         if (bdFileExt === 'csv') {
           const txt = await file.text();
@@ -135,11 +169,13 @@ function startBDWatcher() {
           const txt = await file.text();
           parsed = parseHTMLBDTables(txt);
         }
+        // Normalizar recursos e atividades
         const newResources = (parsed.recursos || []).map(coerceResource);
         const newActivities = (parsed.atividades || []).map(coerceActivity);
         const newHoras = parsed.horas || [];
         const newCfg = parsed.cfg || [];
-        const newFeriados = parsed.feriados || [];
+        // --- INÍCIO DA MODIFICAÇÃO ---
+        // Remontar o objeto trails a partir da lista plana
         const newTrails = {};
         (parsed.historico || []).forEach(h => {
           const id = h.activityId;
@@ -155,24 +191,31 @@ function startBDWatcher() {
             user: h.user
           });
         });
+        // --- FIM DA MODIFICAÇÃO ---
 
         let changed = false;
+        // Atualiza recursos se necessário
         if (JSON.stringify(resources) !== JSON.stringify(newResources)) {
           resources = newResources;
           saveLS(LS.res, resources);
           changed = true;
         }
+        // Atualiza atividades se necessário
         if (JSON.stringify(activities) !== JSON.stringify(newActivities)) {
           activities = newActivities;
           saveLS(LS.act, activities);
           changed = true;
         }
+        // --- INÍCIO DA MODIFICAÇÃO ---
+        // Atualiza histórico (trails) se necessário
         if (JSON.stringify(trails) !== JSON.stringify(newTrails)) {
           trails = newTrails;
           saveLS(LS.trail, trails);
           changed = true;
         }
-        
+        // --- FIM DA MODIFICAÇÃO ---
+
+        // Atualiza horas externas e configurações usando helpers do enhancer2
         let horasChanged = false;
         try {
           if (typeof window.getHorasExternosData === 'function' && typeof window.setHorasExternosData === 'function') {
@@ -192,24 +235,13 @@ function startBDWatcher() {
             }
           }
         } catch(e) {}
-
-        let feriadosChanged = false;
-        try {
-          if(typeof window.getFeriados === 'function' && typeof window.setFeriados === 'function') {
-            const curFeriados = window.getFeriados() || [];
-            if (JSON.stringify(curFeriados) !== JSON.stringify(newFeriados)) {
-              window.setFeriados(newFeriados);
-              feriadosChanged = true;
-            }
-          }
-        } catch(e) {}
-
-        if (changed || horasChanged || feriadosChanged) {
+        if (changed || horasChanged) {
           renderAll();
           updateBDStatus('Atualizado por outra sessão às ' + new Date(lm).toLocaleTimeString());
         }
       }
     } catch (e) {
+      // Erros silenciosos (ex.: permissão negada, arquivo removido)
     }
   }, 3000);
 }
@@ -233,9 +265,11 @@ async function fsaPickFolder(){
     await idbSet(FSA_DB,FSA_STORE,'dir',h);
     dirHandle=h;
     updateFolderStatus();
+    // Carregar dados imediatamente da nova pasta
     try {
       await loadAllFromFolder();
     } catch(e) { /* ignore */ }
+    // Iniciar watcher de sincronização
     startFsaWatcher();
     alert('Pasta definida: '+(h.name||'(sem nome)'));
   }catch(e){ if(e&&e.name!=='AbortError') alert('Não foi possível selecionar a pasta: '+e.message); }
@@ -290,6 +324,7 @@ function updateFolderStatus(extra){
   el.textContent='Pasta: '+(dirHandle.name||'(sem nome)') + (extra? ' — '+extra : '');
 }
 
+// Hook nos botões
 const btnPickFolder=document.getElementById('btnPickFolder');
 const btnSaveNow=document.getElementById('btnSaveNow');
 const btnReloadFromFolder=document.getElementById('btnReloadFromFolder');
@@ -297,12 +332,14 @@ if(btnPickFolder) btnPickFolder.onclick=()=>fsaPickFolder();
 if(btnSaveNow) btnSaveNow.onclick=()=>saveAllToFolder();
 if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
 
+// Na inicialização, tenta recuperar a pasta e carregar (sem bloquear)
 (async()=>{
   if(await hasFSA()){
     dirHandle = await fsaLoadHandle();
     updateFolderStatus();
     if(dirHandle){
       try{ await loadAllFromFolder(); }catch{ /* ignore */ }
+      // Iniciar observação de mudanças em tempo real nos arquivos JSON da pasta
       startFsaWatcher();
     }
   } else {
@@ -310,21 +347,32 @@ if(btnReloadFromFolder) btnReloadFromFolder.onclick=()=>loadAllFromFolder();
   }
 })();
 
+// Redirecionar persistência: salva em LS e também espelha para a pasta (best-effort)
 const _saveLS_orig = saveLS;
 saveLS = function(k,v){
   _saveLS_orig(k,v);
   if(dirHandle) { try{ saveAllToFolder(); }catch{} }
 };
 
+
+// ===== Dados iniciais =====
 const today=clampDate(new Date());
+// Remover dados de exemplo: iniciar app com listas vazias quando não houver dados em localStorage.
 const sampleResources = [];
 const sampleActivities = [];
 
+// Em versões antigas, o armazenamento local podia conter dados de exemplo. Para evitar
+// carregar registros antigos quando você abrir uma nova versão do app, utilize uma
+// chave de versão no localStorage. Ao detectar uma versão mais antiga, os dados
+// persistidos de recursos, atividades, trilhas e horas externas são removidos e
+// substituídos por listas vazias. Ajuste CUR_VERSION ao introduzir mudanças de
+// estrutura ou iniciar uma versão "limpa".
 try {
   const VERSION_KEY = 'rv-version';
   const CUR_VERSION = '3';
   const storedV = localStorage.getItem(VERSION_KEY);
   if (!storedV || storedV < CUR_VERSION) {
+    // Limpa dados persistidos das versões antigas (recursos, atividades, trilhas e horas)
     localStorage.removeItem(LS.res);
     localStorage.removeItem(LS.act);
     localStorage.removeItem(LS.trail);
@@ -332,11 +380,12 @@ try {
     localStorage.setItem(VERSION_KEY, CUR_VERSION);
   }
 } catch (e) {
+  // Ignorar erros de armazenamento (p. ex. quota exceeded)
 }
 
 let resources = loadLS(LS.res, sampleResources);
 let activities = loadLS(LS.act, sampleActivities);
-let trails=loadLS(LS.trail,{}); 
+let trails=loadLS(LS.trail,{}); // { [atividadeId]: [{ts, oldInicio, oldFim, newInicio, newFim, justificativa, user}] }
 function saveTrails(){ saveLS(LS.trail, trails); }
 function addTrail(atividadeId, entry){
   if(!trails[atividadeId]) trails[atividadeId]=[];
@@ -344,7 +393,8 @@ function addTrail(atividadeId, entry){
   saveTrails();
 }
 
-const selectedStatus=new Set(STATUS); 
+// ===== Estado dos filtros =====
+const selectedStatus=new Set(STATUS); // por padrão, todos ativos
 let filtroTipo="";
 let filtroSenioridade="";
 let buscaTitulo="";
@@ -353,6 +403,7 @@ let buscaRecurso="";
 let rangeStart=toYMD(addDays(today,-14));
 let rangeEnd=toYMD(addDays(today,60));
 
+// ===== UI refs =====
 const statusChips=document.getElementById("statusChips");
 const tipoSel=document.getElementById("tipoSel");
 const senioridadeSel=document.getElementById("senioridadeSel");
@@ -391,10 +442,12 @@ const tooltip=document.getElementById("tooltip");
 const aggGran=document.getElementById("aggGran");
 const aggCharts=document.getElementById("aggCharts");
 
+// Usuário atual (opcional) para trilha
 let currentUser = loadLS(LS.user, "");
 if(currentUserInput){ currentUserInput.value=currentUser; currentUserInput.oninput=()=>{ currentUser=currentUserInput.value.trim(); saveLS(LS.user,currentUser); }; }
 
 
+// ===== Abas (tabs) =====
 function activateTab(name){
   document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
   document.querySelectorAll('.tabpanel').forEach(p=>p.classList.toggle('active', p.id==='tab-'+name));
@@ -404,6 +457,7 @@ document.addEventListener('click', (ev)=>{
   activateTab(b.dataset.tab);
 });
 
+// ===== Chips de status =====
 function renderStatusChips(){
   statusChips.innerHTML="";
   STATUS.forEach(s=>{
@@ -415,6 +469,7 @@ function renderStatusChips(){
   });
 }
 
+// ===== Filtros =====
 tipoSel.onchange=()=>{filtroTipo=tipoSel.value; renderAll();};
 senioridadeSel.onchange=()=>{filtroSenioridade=senioridadeSel.value; renderAll();};
 buscaTituloInput.oninput=()=>{buscaTitulo=buscaTituloInput.value.toLowerCase(); renderAll();};
@@ -425,10 +480,12 @@ if(buscaRecursoInput){
   };
 }
 
+// ===== Range =====
 inicioVisao.value=rangeStart; fimVisao.value=rangeEnd;
 inicioVisao.onchange=()=>{rangeStart=inicioVisao.value; renderAll();};
 fimVisao.onchange=()=>{rangeEnd=fimVisao.value; renderAll();};
 
+// ===== CRUD Recurso =====
 document.getElementById("btnNovoRecurso").onclick=()=>{
   dlgRecursoTitulo.textContent="Novo Recurso";
   formRecurso.reset();
@@ -436,6 +493,7 @@ document.getElementById("btnNovoRecurso").onclick=()=>{
   formRecurso.elements["capacidade"].value=100;
   dlgRecurso.showModal();
 };
+/* submit default allowed (dialog will close on cancel) */
 document.getElementById("btnSalvarRecurso").onclick=()=>{
   const f=formRecurso.elements;
   const rec={
@@ -454,9 +512,11 @@ document.getElementById("btnSalvarRecurso").onclick=()=>{
   saveLS(LS.res,resources);
   dlgRecurso.close();
   renderAll();
+  // Salvar BD se houver arquivo selecionado
   saveBDDebounced();
 };
 
+// ===== CRUD Atividade =====
 document.getElementById("btnNovaAtividade").onclick=()=>{
   dlgAtividadeTitulo.textContent="Nova Atividade";
   formAtividade.reset();
@@ -477,6 +537,7 @@ function fillRecursoOptions(){
     sel.appendChild(opt);
   });
 }
+/* submit default allowed (dialog will close on cancel) */
 document.getElementById("btnSalvarAtividade").onclick=()=>{
   const f=formAtividade.elements;
   const at={
@@ -492,6 +553,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
   if(!at.resourceId) return alert("Selecione o recurso.");
   if(fromYMD(at.fim)<fromYMD(at.inicio)) return alert("Fim não pode ser menor que início.");
 
+  // valida janela ativa do recurso, se houver
   const rec=resources.find(x=>x.id===at.resourceId);
   if(rec){
     if(rec.inicioAtivo && fromYMD(at.inicio) < fromYMD(rec.inicioAtivo)){
@@ -501,6 +563,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
       return alert(`Fim da atividade (${at.fim}) maior que fim ativo do recurso (${rec.fimAtivo}).`);
     }
   }
+  // alerta de sobrealocação >100%
   let over=false;
   const start=fromYMD(at.inicio), end=fromYMD(at.fim);
   for(let d=new Date(start); d<=end; d=addDays(d,1)){
@@ -516,12 +579,13 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
     const prev=activities[idx];
     const mudouDatas = prev.inicio!==at.inicio || prev.fim!==at.fim;
     if(mudouDatas){
+      // abrir justificativa
       window.__pendingAt=at;
       window.__pendingIdx=idx;
       justResumo.textContent=`${prev.titulo} — Início: ${prev.inicio} → ${at.inicio} | Fim: ${prev.fim} → ${at.fim}`;
       formJust.elements["just"].value="";
       dlgJust.showModal();
-      return; 
+      return; // continua após confirmar justificativa
     } else {
       activities[idx]=at;
       saveLS(LS.act,activities);
@@ -530,6 +594,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
       saveBDDebounced();
     }
   } else {
+    // novo registro (não exige justificativa para criação)
     activities.push(at);
     saveLS(LS.act,activities);
     dlgAtividade.close();
@@ -538,6 +603,7 @@ document.getElementById("btnSalvarAtividade").onclick=()=>{
   }
 };
 
+// Justificativa confirm
 btnJustConfirm.onclick=(e)=>{
   e.preventDefault();
   const txt=formJust.elements["just"].value.trim();
@@ -561,7 +627,9 @@ btnJustConfirm.onclick=(e)=>{
   saveBDDebounced();
 };
 
+// ===== Tabelas =====
 function renderTables(filteredActs){
+  // Recursos
   tblRecursos.innerHTML="";
   resources.forEach(r=>{
     const tr=document.createElement("tr");
@@ -575,11 +643,9 @@ function renderTables(filteredActs){
       <td>${r.fimAtivo||""}</td>
       <td class="actions">
         <button class="btn">Editar</button>
-        <button class="btn dup">Duplicar</button>
         <button class="btn danger">Excluir</button>
       </td>`;
-    const [btnEdit, btnDup, btnDel] = tr.querySelectorAll("button");
-    btnEdit.onclick=()=>{
+    tr.querySelectorAll("button")[0].onclick=()=>{
       dlgRecursoTitulo.textContent="Editar Recurso";
       formRecurso.elements["id"].value=r.id;
       formRecurso.elements["nome"].value=r.nome;
@@ -591,20 +657,19 @@ function renderTables(filteredActs){
       formRecurso.elements["fimAtivo"].value=r.fimAtivo||"";
       dlgRecurso.showModal();
     };
-    btnDup.onclick=()=>{
-      const copy={...r,id:uuid(),nome:"Cópia de "+r.nome};
-      resources.push(copy); saveLS(LS.res,resources); renderAll();
-    };
-    btnDel.onclick=()=>{
+    tr.querySelectorAll("button")[1].onclick=()=>{
       if(!confirm("Remover recurso e suas alocações?")) return;
       resources=resources.filter(x=>x.id!==r.id);
       activities=activities.filter(a=>a.resourceId!==r.id);
       saveLS(LS.res,resources); saveLS(LS.act,activities);
       renderAll();
+      // Persistir alterações no BD
+      saveBDDebounced();
     };
     tblRecursos.appendChild(tr);
   });
 
+  // Atividades
   tblAtividades.innerHTML="";
   filteredActs.forEach(a=>{
     const r=resources.find(x=>x.id===a.resourceId);
@@ -619,11 +684,9 @@ function renderTables(filteredActs){
       <td class="actions">
         <button class="btn">Editar</button>
         <button class="btn">Histórico</button>
-        <button class="btn dup">Duplicar</button>
         <button class="btn danger">Excluir</button>
       </td>`;
-    const [btnEdit, btnHist, btnDup, btnDel] = tr.querySelectorAll("button");
-    btnEdit.onclick=()=>{
+    tr.querySelectorAll("button")[0].onclick=()=>{
       dlgAtividadeTitulo.textContent="Editar Atividade";
       fillRecursoOptions();
       formAtividade.elements["id"].value=a.id;
@@ -635,7 +698,8 @@ function renderTables(filteredActs){
       formAtividade.elements["alocacao"].value=a.alocacao||100;
       dlgAtividade.showModal();
     };
-    btnHist.onclick=()=>{
+    tr.querySelectorAll("button")[1].onclick=()=>{
+      // abrir histórico
       histCurrentId=a.id;
       const list = trails[a.id]||[];
       if(list.length===0){
@@ -656,22 +720,20 @@ function renderTables(filteredActs){
         histList.innerHTML=rows || '<div class="muted">Sem registros no período.</div>';
       }
       dlgHist.showModal();
-      const btn=document.getElementById('histApply'); if(btn){ btn.onclick=()=>{ btnHist.onclick(); }; }
+      const btn=document.getElementById('histApply'); if(btn){ btn.onclick=()=>{ tr.querySelectorAll('button')[1].onclick(); }; }
     };
-    btnDup.onclick=()=>{
-      const copy={...a,id:uuid(),titulo:"Cópia de "+a.titulo};
-      activities.push(copy); saveLS(LS.act,activities); renderAll();
-    };
-    btnDel.onclick=()=>{
+    tr.querySelectorAll("button")[2].onclick=()=>{
       if(!confirm("Remover atividade?")) return;
       activities=activities.filter(x=>x.id!==a.id);
       saveLS(LS.act,activities);
       renderAll();
+      saveBDDebounced();
     };
     tblAtividades.appendChild(tr);
   });
 }
 
+// ===== Interseção/intervalos =====
 function mergeIntervals(intervals){
   if(!intervals.length) return [];
   const sorted=[...intervals].sort((a,b)=>fromYMD(a.inicio)-fromYMD(b.inicio));
@@ -704,6 +766,7 @@ function invertIntervals(intervals,startYMD,endYMD){
   return free;
 }
 
+// ===== Gantt =====
 function statusClass(s){
   switch(s){
     case "Planejada": return "planejada";
@@ -723,6 +786,7 @@ function buildDays(){
 function renderGantt(filteredActs){
   gantt.innerHTML="";
   const days=buildDays();
+  // Header
   const header=document.createElement("div");
   header.className="header";
   const left=document.createElement("div");
@@ -734,6 +798,7 @@ function renderGantt(filteredActs){
   const gridDays=document.createElement("div");
   gridDays.className="grid-days";
   gridDays.style.gridTemplateColumns=`repeat(${days.length}, 28px)`;
+  // Linha meses
   const rowMonths=document.createElement("div");
   rowMonths.className="row-months";
   rowMonths.style.display="grid";
@@ -746,6 +811,7 @@ function renderGantt(filteredActs){
     cell.textContent=isFirstOfMonth? d.toLocaleDateString(undefined,{month:"short",year:"2-digit"}):"";
     rowMonths.appendChild(cell);
   });
+  // Linha dias
   const rowDays=document.createElement("div");
   rowDays.style.display="grid";
   rowDays.style.gridTemplateColumns=`repeat(${days.length}, 28px)`;
@@ -759,11 +825,14 @@ function renderGantt(filteredActs){
   header.appendChild(left); header.appendChild(right);
   gantt.appendChild(header);
 
+  // Mapa: atividades por recurso (já filtradas)
   const byRes=Object.fromEntries(resources.map(r=>[r.id,[]]));
   filteredActs.forEach(a=>{ if(byRes[a.resourceId]) byRes[a.resourceId].push(a); });
   Object.keys(byRes).forEach(k=>byRes[k].sort((a,b)=>fromYMD(a.inicio)-fromYMD(b.inicio)));
 
+  // Render rows
   resources.forEach(r=>{
+    // filtros
     if(filtroTipo && (r.tipo||"").toLowerCase() !== filtroTipo.toLowerCase()) return;
     if(filtroSenioridade && r.senioridade!==filtroSenioridade) return;
     if(!r.ativo) return;
@@ -780,6 +849,7 @@ function renderGantt(filteredActs){
     const bargrid=document.createElement("div");
     bargrid.className="bargrid";
 
+    // Heatmap de capacidade por dia + tooltip + contador concorrência
     const cap=r.capacidade||100;
     days.forEach((d,i)=>{
       const dy=toYMD(d);
@@ -799,6 +869,7 @@ function renderGantt(filteredActs){
       heat.onmousemove=(ev)=>{ tooltip.style.left = (ev.clientX+12)+"px"; tooltip.style.top = (ev.clientY+12)+"px"; };
       heat.onmouseleave=()=>{ tooltip.classList.add("hidden"); };
       bargrid.appendChild(heat);
+      // contador concorrência
       const c=activeActs.length;
       if(c>1){
         const cc=document.createElement("div");
@@ -810,6 +881,7 @@ function renderGantt(filteredActs){
       }
     });
 
+    // Lanes (pistas) para empilhar atividades concorrentes
     const daysLen = days.length;
     const startBase = fromYMD(rangeStart);
     function dayIndex(ymd){
@@ -820,7 +892,7 @@ function renderGantt(filteredActs){
       const eIdx = dayIndex(a.fim);
       return {a, sIdx, eIdx};
     }).filter(iv=>iv.eIdx>=0 && iv.sIdx<=daysLen-1);
-    const lanes = []; 
+    const lanes = []; // greedy
     const placed = intervals.sort((x,y)=>x.sIdx - y.sIdx).map(iv=>{
       let lane = 0;
       while(lane < lanes.length && !(lanes[lane] < iv.sIdx - 0)) lane++;
@@ -829,6 +901,7 @@ function renderGantt(filteredActs){
       return {...iv, lane};
     });
 
+    // Gaps
     const busy=acts.map(a=>({inicio:toYMD(new Date(Math.max(fromYMD(a.inicio),fromYMD(rangeStart)))),
                              fim:toYMD(new Date(Math.min(fromYMD(a.fim),fromYMD(rangeEnd))))}))
                   .filter(x=>fromYMD(x.inicio)<=fromYMD(x.fim));
@@ -844,6 +917,7 @@ function renderGantt(filteredActs){
       bargrid.appendChild(el);
     });
 
+    // Atividades empilhadas
     placed.forEach(p=>{
       const a=p.a;
       if(!selectedStatus.has((a.status||"").trim())) return;
@@ -871,9 +945,11 @@ function renderGantt(filteredActs){
       bargrid.appendChild(b);
     });
 
+    // altura da linha conforme número de lanes (mínimo 42px)
     const lanesH = Math.max(42, lanes.length*22 + 6);
     bargrid.style.height = lanesH + "px";
 
+    // linhas de grade verticais
     const gridBg=document.createElement("div");
     gridBg.style.position="absolute"; gridBg.style.top="0"; gridBg.style.bottom="0"; gridBg.style.left="0"; gridBg.style.right="0";
     gridBg.style.display="grid"; gridBg.style.gridTemplateColumns=`repeat(${days.length}, 28px)`; gridBg.style.pointerEvents="none";
@@ -889,6 +965,7 @@ function renderGantt(filteredActs){
   });
 }
 
+// ===== Filtragem de atividades =====
 function getFilteredActivities(){
   return activities.filter(a=>{
     if(!selectedStatus.has((a.status||"").trim())) return false;
@@ -904,6 +981,7 @@ function getFilteredActivities(){
   });
 }
 
+// ===== Exportações =====
 function download(name,content,type="text/plain"){
   const blob=new Blob([content],{type});
   const a=document.createElement("a");
@@ -926,6 +1004,7 @@ function toCSV(rows, headerOrder){
   return lines.join("\n");
 }
 
+// Export CSV Recursos/Atividades (estado atual, incluindo IDs)
 document.getElementById("btnExportCSV").onclick=()=>{
   const rec = resources.map(r=>({id:r.id,nome:r.nome,tipo:r.tipo,senioridade:r.senioridade,ativo:r.ativo,capacidade:r.capacidade||100,inicioAtivo:r.inicioAtivo||"",fimAtivo:r.fimAtivo||""}));
   const atv = activities.map(a=>({id:a.id,titulo:a.titulo,resourceId:a.resourceId,inicio:a.inicio,fim:a.fim,status:a.status,alocacao:a.alocacao||100}));
@@ -934,7 +1013,8 @@ document.getElementById("btnExportCSV").onclick=()=>{
   alert("Exportados: recursos.csv e atividades.csv");
 };
 
-function tableHTML(title, rows, cols){
+// Export Excel (XLS compatível via HTML) — um arquivo para recursos e outro para atividades
+function tableHTML(name, rows, cols){
   const header = cols.map(c=>`<th>${c}</th>`).join("");
   const body = rows.map(r=>`<tr>${cols.map(c=>`<td>${(r[c]??"")}</td>`).join("")}</tr>`).join("");
   return `
@@ -943,7 +1023,7 @@ function tableHTML(title, rows, cols){
         xmlns="http://www.w3.org/TR/REC-html40">
   <head><meta charset="utf-8">
   </head><body>
-    <table border="1" id="${title}" data-name="${title}"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
+    <table border="1"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>
   </body></html>`;
 }
 document.getElementById("btnExportXLS").onclick=()=>{
@@ -954,6 +1034,7 @@ document.getElementById("btnExportXLS").onclick=()=>{
   alert("Exportados: recursos.xls e atividades.xls");
 };
 
+// Export CSV diário (Power BI)
 document.getElementById("btnExportPBI").onclick=()=>{
   const rows=[];
   const start=fromYMD(rangeStart), end=fromYMD(rangeEnd);
@@ -983,6 +1064,7 @@ document.getElementById("btnExportPBI").onclick=()=>{
   alert(`Exportado: powerbi_atividades_diarias.csv (${rows.length} linhas)`);
 };
 
+// Histórico consolidado (todas as atividades)
 if(btnHistAll) btnHistAll.onclick=()=>{
   const rows=[];
   const byId=Object.fromEntries(resources.map(r=>[r.id,r]));
@@ -1006,6 +1088,7 @@ if(btnHistAll) btnHistAll.onclick=()=>{
   download("historico_consolidado.csv", toCSV(rows, ["atividadeId","atividadeTitulo","recursoId","recursoNome","ts","oldInicio","oldFim","newInicio","newFim","justificativa","user"]), "text/csv;charset=utf-8");
 };
 
+// Backup/Restore (JSON)
 if(btnBackup) btnBackup.onclick=()=>{
   const dump={resources, activities, trails, meta:{version:"v2", exportedAt:new Date().toISOString()}};
   download("backup_planejador.json", JSON.stringify(dump,null,2), "application/json;charset=utf-8");
@@ -1025,6 +1108,7 @@ if(fileRestore) fileRestore.onchange=(ev)=>{
   reader.readAsText(f,"utf-8");
 };
 
+// ===== Importar CSV (recursos.csv e/ou atividades.csv) =====
 const __fileImportEl = document.getElementById("fileImport");
 if(__fileImportEl) __fileImportEl.onchange=(ev)=>{
   const files=[...ev.target.files];
@@ -1040,6 +1124,7 @@ if(__fileImportEl) __fileImportEl.onchange=(ev)=>{
       const headers=lines[0].split(sep).map(h=>h.trim());
       const idx=(name)=>headers.indexOf(name);
       if(headers.includes("nome") && headers.includes("capacidade")){
+        // recursos.csv
         const arr=[];
         for(let i=1;i<lines.length;i++){
           const cols=lines[i].split(sep);
@@ -1060,6 +1145,7 @@ if(__fileImportEl) __fileImportEl.onchange=(ev)=>{
         resources=[...resources, ...arr.filter(r=>!ids.has(r.id))];
         saveLS(LS.res,resources);
       } else if(headers.includes("titulo") && headers.includes("resourceId")){
+        // atividades.csv
         const arr=[];
         for(let i=1;i<lines.length;i++){
           const cols=lines[i].split(sep);
@@ -1085,6 +1171,7 @@ if(__fileImportEl) __fileImportEl.onchange=(ev)=>{
   });
 };
 
+// ===== Hist dialog export atual =====
 btnHistExport.onclick=(e)=>{
   e.preventDefault();
   if(!histCurrentId){ alert("Abra o histórico de uma atividade."); return; }
@@ -1099,7 +1186,18 @@ btnHistExport.onclick=(e)=>{
   download(`historico_${histCurrentId}.csv`, toCSV(rows, ["ts","oldInicio","oldFim","newInicio","newFim","justificativa","user"]), "text/csv;charset=utf-8");
 };
 
+// ===== Agregados =====
 aggGran.onchange=()=>renderAggregates();
+function bucketKey(d, gran){
+  if(gran==="weekly"){
+    const date=new Date(d); const day=(date.getDay()+6)%7; 
+    const monday=new Date(date); monday.setDate(date.getDate()-day);
+    const y=monday.getFullYear(); const m=String(monday.getMonth()+1).padStart(2,"0"); const day2=String(monday.getDate()).padStart(2,"0");
+    return `W ${y}-${m}-${day2}`;
+  } else {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  }
+}
 function renderAggregates(){
   aggCharts.innerHTML="";
   const gran=aggGran.value;
@@ -1147,6 +1245,7 @@ function renderAggregates(){
   });
 }
 
+// ===== Render principal =====
 function renderAll(){
   const filtered=getFilteredActivities();
   renderTables(filtered);
@@ -1156,17 +1255,19 @@ function renderAll(){
 
 renderStatusChips();
 
+// ===== Disponibilidade (% de capacidade livre) =====
 (function(){
   const avBtn = document.getElementById('avBtn');
   const avRes = document.getElementById('avResultado');
   if(!avBtn || !avRes) return;
 
   function isBusinessDay(d){
-    const wd = d.getDay();
+    const wd = d.getDay(); // 0=dom..6=sab
     return wd>=1 && wd<=5;
   }
 
   function sumAllocationOn(resourceId, date) {
+    // ignore Concluída/Cancelada para disponibilidade
     const acts = activities.filter(a=>a.resourceId===resourceId && a.status!=='Concluída' && a.status!=='Cancelada' && fromYMD(a.inicio)<=date && date<=fromYMD(a.fim));
     return acts.reduce((acc,a)=>acc+(a.alocacao||100),0);
   }
@@ -1243,6 +1344,7 @@ renderStatusChips();
 renderAll();
 
 
+// ===== KPIs (Visão Executiva) =====
 function renderKPIs(){
   try{
     const total=activities.length;
@@ -1255,18 +1357,21 @@ function renderKPIs(){
       const cap=r.capacidade||100;
       const days=buildDays();
       for(const d of days){
+        // Ignore activities that are concluded or cancelled when calculating overload
         const acts=activities.filter(a=>a.resourceId===r.id && a.status !== 'Concluída' && a.status !== 'Cancelada' && fromYMD(a.inicio)<=d && d<=fromYMD(a.fim));
         const sum=acts.reduce((acc,a)=>acc+(a.alocacao||100),0);
         if(sum>cap){sobre++; break;}
       }
     });
     const el3=document.getElementById("kpiSobrecarga"); if(el3) el3.textContent=sobre;
+    // Renderizar detalhes de sobrecarga (exec)
     try{
       renderOverloadDetails();
     }catch(err){ console.error(err); }
-  }catch(e){ }
+  }catch(e){ /* ignora falhas de KPI fora da aba */ }
 }
 
+// ===== Exportar PDF (fallback para janela de impressão se jsPDF/html2canvas não estiverem disponíveis) =====
 (function(){
   const btn=document.getElementById("btnExportPDF");
   if(!btn) return;
@@ -1280,6 +1385,7 @@ function renderKPIs(){
       doc.text("Relatório Planejador de Recursos", 14, 20);
       doc.setFontSize(10);
       doc.text("Gerado em: "+new Date().toLocaleString(), 14, 28);
+      // KPIs
       renderKPIs();
       doc.text("KPIs:", 14, 40);
       const k1=document.getElementById("kpiExecucao")?.textContent||"";
@@ -1288,6 +1394,7 @@ function renderKPIs(){
       doc.text("% Execução: "+k1, 20, 48);
       doc.text("Recursos Ativos: "+k2, 20, 56);
       doc.text("Recursos Sobrecarregados: "+k3, 20, 64);
+      // Listas (resumo textual)
       doc.text("Recursos:", 14, 78);
       let y=86;
       resources.forEach(r=>{ doc.text("- "+r.nome+" ("+r.tipo+", "+r.senioridade+", Cap "+(r.capacidade||100)+"%)", 20, y); y+=6; if(y>270){doc.addPage(); y=20;} });
@@ -1297,15 +1404,17 @@ function renderKPIs(){
         doc.text("- "+a.titulo+" ("+(rec?rec.nome:"—")+") ["+a.status+"] "+a.inicio+" → "+a.fim, 20, y);
         y+=6; if(y>270){doc.addPage(); y=20;}
       });
+      // Snapshot Gantt (opcional)
       if(hasHtml2Canvas){
         try{
           const canvas = await html2canvas(document.getElementById("gantt"));
           const img = canvas.toDataURL("image/png");
           doc.addPage(); doc.text("Visão Gantt",14,20); doc.addImage(img,"PNG",14,30,180,100);
-        }catch(e){ }
+        }catch(e){ /* ignora */ }
       }
       doc.save("planejador_relatorio.pdf");
     } else {
+      // Fallback: abre janela de impressão (usuario pode salvar como PDF)
       const w = window.open("", "_blank");
       const cssCompact = `body{font-family:Arial,sans-serif;padding:16px} h2{margin:16px 0 8px} table{width:100%;border-collapse:collapse;font-size:12px} th,td{border:1px solid #ddd;padding:6px}`;
       w.document.write("<html><head><title>Relatório Planejador</title><style>"+cssCompact+"</style></head><body>");
@@ -1316,6 +1425,7 @@ function renderKPIs(){
       w.document.write("<div>% Execução: "+(document.getElementById("kpiExecucao")?.textContent||"0%")+"</div>");
       w.document.write("<div>Recursos Ativos: "+(document.getElementById("kpiRecursos")?.textContent||"0")+"</div>");
       w.document.write("<div>Recursos Sobrecarregados: "+(document.getElementById("kpiSobrecarga")?.textContent||"0")+"</div>");
+      // Tabelas simples
       w.document.write("<h2>Recursos</h2><table><tr><th>Nome</th><th>Tipo</th><th>Senioridade</th><th>Capacidade%</th></tr>");
       resources.forEach(r=>{ w.document.write("<tr><td>"+r.nome+"</td><td>"+r.tipo+"</td><td>"+r.senioridade+"</td><td>"+(r.capacidade||100)+"</td></tr>"); });
       w.document.write("</table>");
@@ -1330,6 +1440,121 @@ function renderKPIs(){
   };
 })();
 
+// ===== renderTables (sobrescrito para incluir 'Duplicar') =====
+function renderTables(filteredActs){
+  // Recursos
+  tblRecursos.innerHTML="";
+  resources.forEach(r=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td>${r.nome}</td>
+      <td>${r.tipo}</td>
+      <td>${r.senioridade}</td>
+      <td>${r.ativo?"Sim":"Não"}</td>
+      <td>${r.capacidade}</td>
+      <td>${r.inicioAtivo||""}</td>
+      <td>${r.fimAtivo||""}</td>
+      <td class="actions">
+        <button class="btn">Editar</button>
+        <button class="btn dup">Duplicar</button>
+        <button class="btn danger">Excluir</button>
+      </td>`;
+    const [btnEdit, btnDup, btnDel] = tr.querySelectorAll("button");
+    btnEdit.onclick=()=>{
+      dlgRecursoTitulo.textContent="Editar Recurso";
+      formRecurso.elements["id"].value=r.id;
+      formRecurso.elements["nome"].value=r.nome;
+      formRecurso.elements["tipo"].value=r.tipo;
+      formRecurso.elements["senioridade"].value=r.senioridade;
+      formRecurso.elements["ativo"].checked=!!r.ativo;
+      formRecurso.elements["capacidade"].value=r.capacidade||100;
+      formRecurso.elements["inicioAtivo"].value=r.inicioAtivo||"";
+      formRecurso.elements["fimAtivo"].value=r.fimAtivo||"";
+      dlgRecurso.showModal();
+    };
+    btnDup.onclick=()=>{
+      const copy={...r,id:uuid(),nome:"Cópia de "+r.nome};
+      resources.push(copy); saveLS(LS.res,resources); renderAll();
+    };
+    btnDel.onclick=()=>{
+      if(!confirm("Remover recurso e suas alocações?")) return;
+      resources=resources.filter(x=>x.id!==r.id);
+      activities=activities.filter(a=>a.resourceId!==r.id);
+      saveLS(LS.res,resources); saveLS(LS.act,activities);
+      renderAll();
+    };
+    tblRecursos.appendChild(tr);
+  });
+
+  // Atividades
+  tblAtividades.innerHTML="";
+  filteredActs.forEach(a=>{
+    const r=resources.find(x=>x.id===a.resourceId);
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td>${a.titulo}</td>
+      <td>${r? r.nome:"—"}</td>
+      <td>${a.inicio}</td>
+      <td>${a.fim}</td>
+      <td>${a.status}</td>
+      <td>${a.alocacao||100}</td>
+      <td class="actions">
+        <button class="btn">Editar</button>
+        <button class="btn">Histórico</button>
+        <button class="btn dup">Duplicar</button>
+        <button class="btn danger">Excluir</button>
+      </td>`;
+    const [btnEdit, btnHist, btnDup, btnDel] = tr.querySelectorAll("button");
+    btnEdit.onclick=()=>{
+      dlgAtividadeTitulo.textContent="Editar Atividade";
+      fillRecursoOptions();
+      formAtividade.elements["id"].value=a.id;
+      formAtividade.elements["titulo"].value=a.titulo;
+      formAtividade.elements["resourceId"].value=a.resourceId;
+      formAtividade.elements["inicio"].value=a.inicio;
+      formAtividade.elements["fim"].value=a.fim;
+      formAtividade.elements["status"].value=a.status;
+      formAtividade.elements["alocacao"].value=a.alocacao||100;
+      dlgAtividade.showModal();
+    };
+    btnHist.onclick=()=>{
+      histCurrentId=a.id;
+      const list = trails[a.id]||[];
+      if(list.length===0){
+        histList.innerHTML='<div class="muted">Sem alterações de datas registradas para esta atividade.</div>';
+      }else{
+        const s=document.getElementById('histStart').value;
+        const e=document.getElementById('histEnd').value;
+        const rows=list.slice().reverse().filter(it=>{
+          const t=new Date(it.ts);
+          return (!s || t>=fromYMD(s)) && (!e || t<=addDays(fromYMD(e),0));
+        }).map(it=>{
+          return `<div style="padding:6px 8px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; margin:6px 0">
+              <div style="font-size:12px;color:#475569">${new Date(it.ts).toLocaleString()}${it.user? ' • ' + it.user : ''}</div>
+              <div style="font-weight:600">Início: ${it.oldInicio} → ${it.newInicio} | Fim: ${it.oldFim} → ${it.newFim}</div>
+              <div style="margin-top:4px">${it.justificativa? it.justificativa.replace(/</g,'&lt;') : ''}</div>
+            </div>`;
+        }).join("");
+        histList.innerHTML=rows || '<div class="muted">Sem registros no período.</div>';
+      }
+      dlgHist.showModal();
+      const btn=document.getElementById('histApply'); if(btn){ btn.onclick=()=>{ btnHist.onclick(); }; }
+    };
+    btnDup.onclick=()=>{
+      const copy={...a,id:uuid(),titulo:"Cópia de "+a.titulo};
+      activities.push(copy); saveLS(LS.act,activities); renderAll();
+    };
+    btnDel.onclick=()=>{
+      if(!confirm("Remover atividade?")) return;
+      activities=activities.filter(x=>x.id!==a.id);
+      saveLS(LS.act,activities);
+      renderAll();
+    };
+    tblAtividades.appendChild(tr);
+  });
+}
+
+// ===== Hook no renderAll para atualizar KPIs sem quebrar fluxo =====
 (function(){
   const _renderAll = renderAll;
   renderAll = function(){
@@ -1338,6 +1563,7 @@ function renderKPIs(){
   };
 })();
 
+// === Helpers para detalhamento de sobrecarga na Visão Executiva ===
 function computeOverloads(){
   const result=[];
   resources.forEach(r=>{
@@ -1407,9 +1633,28 @@ function renderOverloadDetails(){
   tbody.innerHTML = rows.map(r=>`<tr><td>${r.nome}</td><td>${r.periodo}</td><td>${r.atividades}</td></tr>`).join('');
 }
 
+// ===== BD por Excel/CSV (modelo único) =====
+let bdFileHandle = null;
+
 function updateBDStatus(msg){
   const el = document.getElementById('bdStatus');
   if(el) el.textContent = msg||'';
+}
+
+function parseHTMLExcelTables(htmlText){
+  const doc = new DOMParser().parseFromString(htmlText, 'text/html');
+  const tRec = doc.querySelector('#Recursos') || doc.querySelector('table[data-name="Recursos"]') || doc.querySelector('table:nth-of-type(1)');
+  const tAtv = doc.querySelector('#Atividades') || doc.querySelector('table[data-name="Atividades"]') || doc.querySelector('table:nth-of-type(2)');
+  function tableToObjects(tbl){
+    if(!tbl) return [];
+    const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
+    if(rows.length===0) return [];
+    const headers=rows[0].map(h=>h.trim());
+    return rows.slice(1).filter(r=>r.some(v=>v && v.trim().length)).map(r=>{
+      const o={}; headers.forEach((h,i)=>o[h]=r[i]??''); return o;
+    });
+  }
+  return { recursos: tableToObjects(tRec), atividades: tableToObjects(tAtv) };
 }
 
 function coerceResource(r){
@@ -1437,14 +1682,34 @@ function coerceActivity(a){
   };
 }
 
+function parseCSVUnico(text){
+  const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+  if(lines.length===0) return {recursos:[], atividades:[]};
+  const sep = lines[0].includes(';')?';':',';
+  const headers = lines[0].split(sep).map(h=>h.trim());
+  const rows = lines.slice(1).map(l=>{
+    const cols = l.split(sep).map(c=>c.trim().replace(/^"|"$/g,''));
+    const o={}; headers.forEach((h,i)=>o[h]=cols[i]||''); return o;
+  });
+  const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
+  const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
+  return {recursos, atividades};
+}
+
+/**
+ * Parse an Excel (HTML) BD file that contains up to three tables: Recursos,
+ * Atividades e HorasExternos. Returns an object with arrays of recursos,
+ * atividades e horas. Tabelas extras ou ausentes serão ignoradas.
+ */
 function parseHTMLBDTables(htmlText){
   const doc = new DOMParser().parseFromString(htmlText, 'text/html');
   const tRec = doc.querySelector('#Recursos') || doc.querySelector('table[data-name="Recursos"]') || doc.querySelector('table:nth-of-type(1)');
   const tAtv = doc.querySelector('#Atividades') || doc.querySelector('table[data-name="Atividades"]') || doc.querySelector('table:nth-of-type(2)');
+  // HorasExternos pode ser a terceira tabela ou ter id/data-name específico
   const tHoras = doc.querySelector('#HorasExternos') || doc.querySelector('table[data-name="HorasExternos"]') || doc.querySelector('table:nth-of-type(3)');
+  // --- INÍCIO DA MODIFICAÇÃO ---
   const tHist = doc.querySelector('#HistoricoAtividades') || doc.querySelector('table[data-name="HistoricoAtividades"]');
-  const tFeriados = doc.querySelector('#Feriados') || doc.querySelector('table[data-name="Feriados"]');
-
+  // --- FIM DA MODIFICAÇÃO ---
   function tableToObjects(tbl){
     if(!tbl) return [];
     const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
@@ -1457,18 +1722,22 @@ function parseHTMLBDTables(htmlText){
   const recursos = tableToObjects(tRec);
   const atividades = tableToObjects(tAtv);
   const horasRows = tableToObjects(tHoras);
+  // --- INÍCIO DA MODIFICAÇÃO ---
   const historico = tableToObjects(tHist);
-  const feriados = tableToObjects(tFeriados);
-
+  // --- FIM DA MODIFICAÇÃO ---
+  // Coerce horas: expects columns id, date (ou data), minutos ou horas, tipo, projeto
   const horas = horasRows.map(h=>{
     const id = h.id || h.ID || h.resourceId || h.RecursoID || h.colaborador || h.Colaborador || '';
     const date = h.date || h.Date || h.data || h.Data || '';
     let minutos = h.minutos || h.Minutos || h.horas || h.Horas || '';
+    // If minutos has HH:MM or decimal, convert to minutes; if plain integer treat as minutes
     const parseStr = (s) => {
       s = String(s||'').trim();
       if(!s) return 0;
+      // Accept HH:MM with unlimited hours
       const m = s.match(/^(\d+):(\d{2})$/);
       if(m){ return parseInt(m[1],10)*60 + parseInt(m[2],10); }
+      // Accept decimal numbers only if contains dot or comma
       if (s.includes('.') || s.includes(',')) {
         const f = parseFloat(s.replace(',', '.'));
         if(!isNaN(f)) return Math.round(f*60);
@@ -1481,6 +1750,7 @@ function parseHTMLBDTables(htmlText){
     const projeto = h.projeto || h.Projeto || '';
     return { id: String(id), date: date, minutos: minutos, tipo: tipo, projeto: projeto };
   });
+  // Parse HorasExternosCfg table if present
   const tCfg = doc.querySelector('#HorasExternosCfg') || doc.querySelector('table[data-name="HorasExternosCfg"]') || null;
   let cfg = [];
   if (tCfg) {
@@ -1493,15 +1763,23 @@ function parseHTMLBDTables(htmlText){
       return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
     });
   }
-  return { recursos, atividades, horas, cfg, historico, feriados };
+  return { recursos, atividades, horas, cfg, historico }; // --- MODIFICADO ---
 }
 
+/**
+ * Parse a CSV único BD file that contains linhas para recurso, atividade e horas. Rows
+ * must have a coluna 'tabela' to classify tipo. Horas são identificadas
+ * pelo valor começando com 'hora'. Colunas esperadas: id/resourceId/colaborador,
+ * date/data, minutos/horas, tipo, projeto. Os valores de horas podem estar
+ * em HH:MM, decimal ou minutos.
+ */
 function parseCSVBDUnico(text){
   const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
-  if(lines.length===0) return {recursos:[], atividades:[], horas:[], historico:[], feriados: []};
+  if(lines.length===0) return {recursos:[], atividades:[], horas:[], historico:[]}; // --- MODIFICADO ---
   const sep = lines[0].includes(';')?';':',';
   const headers = lines[0].split(sep).map(h=>h.trim());
   const rows = lines.slice(1).map(l=>{
+    // Preserve quoted values with commas/semicolons by splitting manually
     const cols = [];
     let cur = '';
     let inQuote = false;
@@ -1516,9 +1794,10 @@ function parseCSVBDUnico(text){
   });
   const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
   const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
+  // --- INÍCIO DA MODIFICAÇÃO ---
   const historico = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('historico'));
-  const feriados = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('feriado'));
-  
+  // --- FIM DA MODIFICAÇÃO ---
+  // Horas externas: linhas onde tabela começa com "hora" mas não hora_cfg
   const horas = rows.filter(r => {
     const tab = String(r.tabela || '').toLowerCase();
     return tab.startsWith('hora') && !tab.startsWith('hora_cfg');
@@ -1531,6 +1810,7 @@ function parseCSVBDUnico(text){
       if (!s) return 0;
       const m = s.match(/^(\d+):(\d{2})$/);
       if (m) { return parseInt(m[1], 10) * 60 + parseInt(m[2], 10); }
+      // Only treat as decimal hours if contains dot or comma
       if (s.includes('.') || s.includes(',')) {
         const f = parseFloat(s.replace(',', '.'));
         if (!isNaN(f)) return Math.round(f * 60);
@@ -1543,6 +1823,7 @@ function parseCSVBDUnico(text){
     const projeto = r.projeto || r.Projeto || '';
     return { id: String(id), date: date, minutos: minutos, tipo: tipo, projeto: projeto };
   });
+  // Configuration (hora_cfg) rows
   const cfg = rows.filter(r => String(r.tabela || '').toLowerCase().startsWith('hora_cfg')).map(r => {
     const rid = r.id || r.Id || r.resourceId || '';
     const horasDia = r.horasDia || r.horasdia || r.horasDiaMin || r.horas_dia || '';
@@ -1550,47 +1831,70 @@ function parseCSVBDUnico(text){
     const projetos = r.projetos || r.Projetos || '';
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
-  return { recursos, atividades, horas, cfg, historico, feriados };
+  return { recursos, atividades, horas, cfg, historico }; // --- MODIFICADO ---
 }
 
+// === Persistência do BD selecionado ===
+/**
+ * Salva os dados atuais de recursos, atividades e horas externos no arquivo BD selecionado.
+ * Suporta formatos HTML (xls compatível) e CSV único. Se nenhuma handle foi selecionada,
+ * a função retorna sem efeito. Erros de permissão são tratados silenciosamente e
+ * reportados no console. O status é atualizado via updateBDStatus.
+ */
 async function saveBD() {
   if (!bdHandle) return;
   try {
+    // Montar conteúdo conforme a extensão do arquivo
     let content = '';
     let mime = '';
+    // Obter horas externas e configurações atuais
     let horasList = [];
     let cfgList = [];
-    let feriadosList = [];
     try {
-      if (typeof window.getHorasExternosData === 'function') horasList = window.getHorasExternosData() || [];
-      if (typeof window.getHorasExternosConfig === 'function') cfgList = window.getHorasExternosConfig() || [];
-      if (typeof window.getFeriados === 'function') feriadosList = window.getFeriados() || [];
+      if (typeof window.getHorasExternosData === 'function') {
+        const out = window.getHorasExternosData();
+        if (Array.isArray(out)) horasList = out;
+      }
     } catch(e){}
-
+    try {
+      if (typeof window.getHorasExternosConfig === 'function') {
+        const outCfg = window.getHorasExternosConfig();
+        if (Array.isArray(outCfg)) cfgList = outCfg;
+      }
+    } catch(e){}
     if (bdFileExt === 'csv') {
-      const header = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos','activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legenda'];
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      // CSV único com coluna tabela. Adicionamos colunas extras para configuração e histórico.
+      const header = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos','activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user'];
       const rows = [];
+      // --- FIM DA MODIFICAÇÃO ---
+      // Recursos
       resources.forEach(r => {
         rows.push({
           tabela:'recurso', id:r.id, nome:r.nome, tipo:r.tipo, senioridade:r.senioridade,
           capacidade:r.capacidade, ativo:r.ativo?'S':'N', inicioAtivo:r.inicioAtivo||'', fimAtivo:r.fimAtivo||''
         });
       });
+      // Atividades
       activities.forEach(a => {
         rows.push({
           tabela:'atividade', id:a.id, titulo:a.titulo, resourceId:a.resourceId, inicio:a.inicio, fim:a.fim, status:a.status, alocacao:a.alocacao
         });
       });
+      // Horas
       horasList.forEach(h => {
         rows.push({
           tabela:'hora_externo', id:h.id, date:h.date || '', minutos:h.minutos, tipoHora:h.tipo || '', projeto:h.projeto || ''
         });
       });
+      // Configurações
       cfgList.forEach(cfg => {
         rows.push({
           tabela:'hora_cfg', id:cfg.id, horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || ''
         });
       });
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      // Histórico de Atividades
       Object.keys(trails).forEach(activityId => {
         (trails[activityId] || []).forEach(entry => {
           rows.push({
@@ -1606,18 +1910,14 @@ async function saveBD() {
           });
         });
       });
-      feriadosList.forEach(f => {
-        rows.push({
-            tabela: 'feriado',
-            date: f.date,
-            legenda: f.legend
-        });
-      });
+      // --- FIM DA MODIFICAÇÃO ---
+      // Converter rows para CSV
       const csvRows = [];
       csvRows.push(header.join(','));
       rows.forEach(row => {
         const vals = header.map(h => {
-          let v = row[h] ?? '';
+          let v = row[h] || '';
+          // Escape double quotes and wrap with quotes if contains separator or quotes
           const needsQuote = String(v).includes(',') || String(v).includes(';') || String(v).includes('"');
           v = String(v).replace(/"/g, '""');
           return needsQuote ? '"'+v+'"' : v;
@@ -1627,18 +1927,30 @@ async function saveBD() {
       content = csvRows.join('\n');
       mime = 'text/csv;charset=utf-8';
     } else {
+      // HTML (xls compatível) com tabelas
+      function tableHTML(title, headers, rows) {
+        const thead = headers.map(h => `<th>${h}</th>`).join('');
+        const tbody = rows.map(r => `<tr>${headers.map(h => `<td>${r[h] ?? ''}</td>`).join('')}</tr>`).join('');
+        return `<h3>${title}</h3><table id='${title}' data-name='${title}' border='1'><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`;
+      }
+      // Recursos table
       const headersRec = ['id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo'];
       const recRows = resources.map(r => ({
         id:r.id, nome:r.nome, tipo:r.tipo, senioridade:r.senioridade, capacidade:r.capacidade, ativo:r.ativo?'S':'N', inicioAtivo:r.inicioAtivo||'', fimAtivo:r.fimAtivo||''
       }));
+      // Atividades table
       const headersAtv = ['id','titulo','resourceId','inicio','fim','status','alocacao'];
       const atvRows = activities.map(a => ({
         id:a.id, titulo:a.titulo, resourceId:a.resourceId, inicio:a.inicio, fim:a.fim, status:a.status, alocacao:a.alocacao
       }));
+      // HorasExternos table
       const headersHoras = ['id','date','minutos','tipo','projeto'];
       const horasRows = horasList.map(h => ({ id:h.id, date:h.date || '', minutos:h.minutos, tipo:h.tipo || '', projeto:h.projeto || '' }));
+      // HorasExternosCfg table
       const headersCfg = ['id','horasDia','dias','projetos'];
       const cfgRows = cfgList.map(cfg => ({ id: cfg.id, horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || '' }));
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      // HistoricoAtividades table
       const headersHist = ['activityId', 'timestamp', 'oldInicio', 'oldFim', 'newInicio', 'newFim', 'justificativa', 'user'];
       const histRows = [];
       Object.keys(trails).forEach(activityId => {
@@ -1655,18 +1967,17 @@ async function saveBD() {
               });
           });
       });
-      const headersFeriados = ['data', 'legenda'];
-
       content = `<!doctype html><html><head><meta charset='utf-8'><title>BD</title></head><body>`+
         tableHTML('Recursos', headersRec, recRows) +
         tableHTML('Atividades', headersAtv, atvRows) +
         tableHTML('HorasExternos', headersHoras, horasRows) +
         tableHTML('HorasExternosCfg', headersCfg, cfgRows) +
-        tableHTML('HistoricoAtividades', headersHist, histRows) +
-        tableHTML('Feriados', headersFeriados, feriadosList) +
+        tableHTML('HistoricoAtividades', headersHist, histRows) + // Nova tabela
         `</body></html>`;
+      // --- FIM DA MODIFICAÇÃO ---
       mime = 'text/html;charset=utf-8';
     }
+    // Gravar no arquivo via FileSystemWritableFileStream
     const writable = await bdHandle.createWritable();
     await writable.write(new Blob([content], { type: mime }));
     await writable.close();
@@ -1677,12 +1988,16 @@ async function saveBD() {
   }
 }
 
+// Debounce salvar BD para evitar gravações consecutivas em alta frequência
 function saveBDDebounced() {
   if (!bdHandle) return;
   clearTimeout(_saveBDTimer);
   _saveBDTimer = setTimeout(() => { saveBD(); }, 1000);
 }
 
+// Registrar callback para alterações de horas externas (Gestão de Horas). O enhancer2.js
+// chama window.onHorasExternosChange() sempre que as horas são salvas. Aqui
+// simplesmente disparamos a persistência do BD com debounce.
 if (typeof window !== 'undefined') {
   try {
     window.onHorasExternosChange = () => {
@@ -1691,6 +2006,7 @@ if (typeof window !== 'undefined') {
   } catch(e){}
 }
 
+// Handle BD file input
 const fileBD = document.getElementById('fileBD');
 if(fileBD){
   fileBD.onchange = async (ev)=>{
@@ -1699,19 +2015,22 @@ if(fileBD){
     try{
       const ext = f.name.toLowerCase().split('.').pop();
       const text = await f.text();
-      let parsed;
+      let parsed; // --- MODIFICADO ---
       if(ext==='csv'){
-        parsed = parseCSVBDUnico(text);
+        parsed = parseCSVBDUnico(text); // --- MODIFICADO ---
+        resources = (parsed.recursos || []).map(coerceResource);
+        activities = (parsed.atividades || []).map(coerceActivity);
+        if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
+        if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
       } else {
-        parsed = parseHTMLBDTables(text);
+        parsed = parseHTMLBDTables(text); // --- MODIFICADO ---
+        resources = (parsed.recursos || []).map(coerceResource);
+        activities = (parsed.atividades || []).map(coerceActivity);
+        if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
+        if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
       }
-      resources = (parsed.recursos || []).map(coerceResource);
-      activities = (parsed.atividades || []).map(coerceActivity);
-      
-      if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
-      if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
-      if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
-
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      // Remontar o objeto trails a partir da lista plana lida do arquivo
       const newTrails = {};
       (parsed.historico || []).forEach(h => {
         const id = h.activityId;
@@ -1728,16 +2047,17 @@ if(fileBD){
         });
       });
       trails = newTrails;
-      
+      // --- FIM DA MODIFICAÇÃO ---
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
-      saveLS(LS.trail, trails);
+      saveLS(LS.trail, trails); // --- ADICIONADO ---
       renderAll();
       updateBDStatus('BD carregado: '+ f.name);
     } catch(e){ alert('Erro ao ler arquivo BD: '+ e.message); }
   };
 }
 
+// Pasta de dados (atalho no bloco de BD)
 const btnSelectDirInBD = document.getElementById('btnSelectDirInBD');
 if(btnSelectDirInBD){
   btnSelectDirInBD.onclick = async ()=>{
@@ -1755,6 +2075,7 @@ if(btnSelectDirInBD){
   };
 }
 
+// Selecionar arquivo BD com permissão de escrita (File System Access API)
 const btnPickBDFile = document.getElementById('btnPickBDFile');
 if(btnPickBDFile){
   btnPickBDFile.onclick = async () => {
@@ -1778,9 +2099,11 @@ if(btnPickBDFile){
       });
       if (!handle) return;
       bdHandle = handle;
+      // Determine nome e extensão
       const file = await handle.getFile();
       bdFileName = file.name || '';
       bdFileExt = (bdFileName.split('.').pop() || '').toLowerCase();
+      // Ler conteúdo inicial
       const text = await file.text();
       let parsed;
       if (bdFileExt === 'csv') {
@@ -1790,10 +2113,14 @@ if(btnPickBDFile){
       }
       resources = (parsed.recursos || []).map(coerceResource);
       activities = (parsed.atividades || []).map(coerceActivity);
-      if (parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
-      if (parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
-      if (parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
-      
+      if (parsed.horas && typeof window.setHorasExternosData === 'function') {
+        window.setHorasExternosData(parsed.horas);
+      }
+      if (parsed.cfg && typeof window.setHorasExternosConfig === 'function') {
+        window.setHorasExternosConfig(parsed.cfg);
+      }
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      // Remontar o objeto trails a partir da lista plana lida do arquivo
       const newTrails = {};
       (parsed.historico || []).forEach(h => {
         const id = h.activityId;
@@ -1810,12 +2137,13 @@ if(btnPickBDFile){
         });
       });
       trails = newTrails;
-      
+      // --- FIM DA MODIFICAÇÃO ---
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
-      saveLS(LS.trail, trails);
+      saveLS(LS.trail, trails); // --- ADICIONADO ---
       renderAll();
       updateBDStatus('BD carregado e pronto: ' + bdFileName);
+      // Iniciar observação de alterações no arquivo BD
       startBDWatcher();
     } catch (e) {
       if (e && e.name !== 'AbortError') {
@@ -1840,58 +2168,65 @@ async function ensureDirOrAsk(){
   }
 }
 
+// Export model Excel
 const btnExportModeloXLS = document.getElementById('btnExportModeloXLS');
 if(btnExportModeloXLS){
   btnExportModeloXLS.onclick = () => {
+    // Gera um modelo de BD (Excel compatível) contendo tabelas de Recursos, Atividades e HorasExternos.
     const headersRec = ['id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo'];
     const headersAtv = ['id','titulo','resourceId','inicio','fim','status','alocacao'];
     const headersHoras = ['id','date','minutos','tipo','projeto'];
-    const headersCfg = ['id','horasDia','dias','projetos'];
-    const headersHist = ['activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user'];
-    const headersFeriados = ['data', 'legenda'];
-
     const exampleRec = [{id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''}];
     const exampleAtv = [{id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100}];
-    const exampleHoras = [{id:'R1',date:'2025-01-15',minutos:480,tipo:'trabalho',projeto:'Projeto X'}];
-    const exampleCfg = [{id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Projeto X:300:00'}];
+    const exampleHoras = [{id:'R1',date:'2025-01-15',minutos:480,tipo:'trabalho',projeto:'Alca Analitico'}];
+    // Example configuration for HorasExternosCfg
+    const headersCfg = ['id','horasDia','dias','projetos'];
+    const exampleCfg = [{id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'}];
+    // --- INÍCIO DA MODIFICAÇÃO ---
+    // Example for HistoricoAtividades
+    const headersHist = ['activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user'];
     const exampleHist = [{activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'}];
-    const exampleFeriados = [{data: '2025-01-01', legenda: 'Confraternização Universal'}, {data: '2025-12-25', legenda: 'Natal'}];
-    
+    // --- FIM DA MODIFICAÇÃO ---
     function table(title, headers, rows){
       const thead = headers.map(h=>`<th>${h}</th>`).join('');
       const tbody = rows.map(r=>`<tr>${headers.map(h=>`<td>${(r[h]??'')}</td>`).join('')}</tr>`).join('');
-      return `<h3>${title}</h3><table id="${title}" data-name="${title}" border='1'><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`;
+      return `<h3>${title}</h3><table border='1'><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`;
     }
     const html = `<!doctype html><html><head><meta charset='utf-8'><title>Modelo BD</title></head><body>`+
       table('Recursos', headersRec, exampleRec) +
       table('Atividades', headersAtv, exampleAtv) +
       table('HorasExternos', headersHoras, exampleHoras) +
       table('HorasExternosCfg', headersCfg, exampleCfg) +
-      table('HistoricoAtividades', headersHist, exampleHist) +
-      table('Feriados', headersFeriados, exampleFeriados) +
+      table('HistoricoAtividades', headersHist, exampleHist) + // --- ADICIONADO ---
       `</body></html>`;
+    // Utilize download() para salvar o arquivo diretamente via navegador (sem exigir seleção de pasta)
     download('modelo_bd.xls', html, 'application/vnd.ms-excel');
     alert('Modelo de BD (Excel) gerado: modelo_bd.xls');
   };
 }
 
+// Export model CSV
 const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
 if(btnExportModeloCSV){
   btnExportModeloCSV.onclick = () => {
-    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user','legenda'];
+    // Gera um modelo de BD em formato CSV único com coluna "tabela".
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user']; // --- MODIFICADO ---
     const sample = [
-      {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01'},
+      {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
       {tabela:'atividade',id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100},
-      {tabela:'hora_externo',id:'R1',date:'2025-01-15',minutos:480,tipoHora:'trabalho',projeto:'Projeto X'},
-      {tabela:'hora_cfg',id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Projeto X:300:00'},
-      {tabela:'historico', activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'},
-      {tabela:'feriado', date: '2025-12-25', legenda: 'Natal'}
+      {tabela:'hora_externo',id:'R1',date:'2025-01-15',minutos:480,tipoHora:'trabalho',projeto:'Alca Analitico'},
+      {tabela:'hora_cfg',id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'},
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      {tabela:'historico', activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'}
+      // --- FIM DA MODIFICAÇÃO ---
     ];
     const rows = [headers.join(',')];
     sample.forEach(obj => {
       const line = headers.map(h => {
         const v = obj[h] ?? '';
-        return '"' + String(v).replace(/"/g, '""') + '"';
+        // Preencher colunas vazias para manter a estrutura
+        const cleanV = String(v).replace(/"/g, '""');
+        return '"' + cleanV + '"';
       }).join(',');
       rows.push(line);
     });
@@ -1901,6 +2236,7 @@ if(btnExportModeloCSV){
   };
 }
 
+// Initialize BD status on load
 (() => {
   if(dirHandle){ updateBDStatus('Pasta selecionada ✓ — Salvo'); }
 })();
