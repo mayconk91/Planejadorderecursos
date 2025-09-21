@@ -174,6 +174,7 @@ function startBDWatcher() {
         const newActivities = (parsed.atividades || []).map(coerceActivity);
         const newHoras = parsed.horas || [];
         const newCfg = parsed.cfg || [];
+        const newFeriados = parsed.feriados || [];
         // --- INÍCIO DA MODIFICAÇÃO ---
         // Remontar o objeto trails a partir da lista plana
         const newTrails = {};
@@ -234,6 +235,15 @@ function startBDWatcher() {
               horasChanged = true;
             }
           }
+        } catch(e) {}
+        try {
+            if (typeof window.getFeriados === 'function' && typeof window.setFeriados === 'function') {
+                const curFeriados = window.getFeriados() || [];
+                if (JSON.stringify(curFeriados) !== JSON.stringify(newFeriados)) {
+                    window.setFeriados(newFeriados);
+                    horasChanged = true;
+                }
+            }
         } catch(e) {}
         if (changed || horasChanged) {
           renderAll();
@@ -1709,6 +1719,7 @@ function parseHTMLBDTables(htmlText){
   const tHoras = doc.querySelector('#HorasExternos') || doc.querySelector('table[data-name="HorasExternos"]') || doc.querySelector('table:nth-of-type(3)');
   // --- INÍCIO DA MODIFICAÇÃO ---
   const tHist = doc.querySelector('#HistoricoAtividades') || doc.querySelector('table[data-name="HistoricoAtividades"]');
+  const tFeriados = doc.querySelector('#Feriados') || doc.querySelector('table[data-name="Feriados"]');
   // --- FIM DA MODIFICAÇÃO ---
   function tableToObjects(tbl){
     if(!tbl) return [];
@@ -1724,6 +1735,7 @@ function parseHTMLBDTables(htmlText){
   const horasRows = tableToObjects(tHoras);
   // --- INÍCIO DA MODIFICAÇÃO ---
   const historico = tableToObjects(tHist);
+  const feriados = tableToObjects(tFeriados);
   // --- FIM DA MODIFICAÇÃO ---
   // Coerce horas: expects columns id, date (ou data), minutos ou horas, tipo, projeto
   const horas = horasRows.map(h=>{
@@ -1763,7 +1775,7 @@ function parseHTMLBDTables(htmlText){
       return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
     });
   }
-  return { recursos, atividades, horas, cfg, historico }; // --- MODIFICADO ---
+  return { recursos, atividades, horas, cfg, historico, feriados }; // --- MODIFICADO ---
 }
 
 /**
@@ -1775,7 +1787,7 @@ function parseHTMLBDTables(htmlText){
  */
 function parseCSVBDUnico(text){
   const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
-  if(lines.length===0) return {recursos:[], atividades:[], horas:[], historico:[]}; // --- MODIFICADO ---
+  if(lines.length===0) return {recursos:[], atividades:[], horas:[], historico:[], feriados:[]}; // --- MODIFICADO ---
   const sep = lines[0].includes(';')?';':',';
   const headers = lines[0].split(sep).map(h=>h.trim());
   const rows = lines.slice(1).map(l=>{
@@ -1796,6 +1808,7 @@ function parseCSVBDUnico(text){
   const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
   // --- INÍCIO DA MODIFICAÇÃO ---
   const historico = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('historico'));
+  const feriados = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('feriado'));
   // --- FIM DA MODIFICAÇÃO ---
   // Horas externas: linhas onde tabela começa com "hora" mas não hora_cfg
   const horas = rows.filter(r => {
@@ -1831,7 +1844,7 @@ function parseCSVBDUnico(text){
     const projetos = r.projetos || r.Projetos || '';
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
-  return { recursos, atividades, horas, cfg, historico }; // --- MODIFICADO ---
+  return { recursos, atividades, horas, cfg, historico, feriados }; // --- MODIFICADO ---
 }
 
 // === Persistência do BD selecionado ===
@@ -1850,6 +1863,7 @@ async function saveBD() {
     // Obter horas externas e configurações atuais
     let horasList = [];
     let cfgList = [];
+    let feriadosList = [];
     try {
       if (typeof window.getHorasExternosData === 'function') {
         const out = window.getHorasExternosData();
@@ -1862,10 +1876,16 @@ async function saveBD() {
         if (Array.isArray(outCfg)) cfgList = outCfg;
       }
     } catch(e){}
+    try {
+        if (typeof window.getFeriados === 'function') {
+            const outFeriados = window.getFeriados();
+            if(Array.isArray(outFeriados)) feriadosList = outFeriados;
+        }
+    } catch(e) {}
     if (bdFileExt === 'csv') {
       // --- INÍCIO DA MODIFICAÇÃO ---
       // CSV único com coluna tabela. Adicionamos colunas extras para configuração e histórico.
-      const header = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos','activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user'];
+      const header = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos','activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend'];
       const rows = [];
       // --- FIM DA MODIFICAÇÃO ---
       // Recursos
@@ -1909,6 +1929,14 @@ async function saveBD() {
             user: entry.user
           });
         });
+      });
+      // Feriados
+      feriadosList.forEach(f => {
+          rows.push({
+              tabela: 'feriado',
+              date: f.date,
+              legend: f.legend
+          });
       });
       // --- FIM DA MODIFICAÇÃO ---
       // Converter rows para CSV
@@ -1967,12 +1995,17 @@ async function saveBD() {
               });
           });
       });
+      // Feriados table
+      const headersFeriados = ['date', 'legend'];
+      const feriadosRows = feriadosList.map(f => ({ date: f.date, legend: f.legend || '' }));
+      
       content = `<!doctype html><html><head><meta charset='utf-8'><title>BD</title></head><body>`+
         tableHTML('Recursos', headersRec, recRows) +
         tableHTML('Atividades', headersAtv, atvRows) +
         tableHTML('HorasExternos', headersHoras, horasRows) +
         tableHTML('HorasExternosCfg', headersCfg, cfgRows) +
-        tableHTML('HistoricoAtividades', headersHist, histRows) + // Nova tabela
+        tableHTML('HistoricoAtividades', headersHist, histRows) +
+        tableHTML('Feriados', headersFeriados, feriadosRows) +
         `</body></html>`;
       // --- FIM DA MODIFICAÇÃO ---
       mime = 'text/html;charset=utf-8';
@@ -2022,12 +2055,14 @@ if(fileBD){
         activities = (parsed.atividades || []).map(coerceActivity);
         if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
         if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
+        if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
       } else {
         parsed = parseHTMLBDTables(text); // --- MODIFICADO ---
         resources = (parsed.recursos || []).map(coerceResource);
         activities = (parsed.atividades || []).map(coerceActivity);
         if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
         if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
+        if(parsed.feriados && typeof window.setFeriados === 'function') window.setFeriados(parsed.feriados);
       }
       // --- INÍCIO DA MODIFICAÇÃO ---
       // Remontar o objeto trails a partir da lista plana lida do arquivo
@@ -2119,6 +2154,9 @@ if(btnPickBDFile){
       if (parsed.cfg && typeof window.setHorasExternosConfig === 'function') {
         window.setHorasExternosConfig(parsed.cfg);
       }
+      if (parsed.feriados && typeof window.setFeriados === 'function') {
+        window.setFeriados(parsed.feriados);
+      }
       // --- INÍCIO DA MODIFICAÇÃO ---
       // Remontar o objeto trails a partir da lista plana lida do arquivo
       const newTrails = {};
@@ -2186,18 +2224,22 @@ if(btnExportModeloXLS){
     // Example for HistoricoAtividades
     const headersHist = ['activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user'];
     const exampleHist = [{activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'}];
+    // Example for Feriados
+    const headersFeriados = ['date', 'legend'];
+    const exampleFeriados = [{date: '2025-12-25', legend: 'Natal'}];
     // --- FIM DA MODIFICAÇÃO ---
     function table(title, headers, rows){
       const thead = headers.map(h=>`<th>${h}</th>`).join('');
       const tbody = rows.map(r=>`<tr>${headers.map(h=>`<td>${(r[h]??'')}</td>`).join('')}</tr>`).join('');
-      return `<h3>${title}</h3><table border='1'><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`;
+      return `<h3>${title}</h3><table id="${title}" data-name="${title}" border='1'><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`;
     }
     const html = `<!doctype html><html><head><meta charset='utf-8'><title>Modelo BD</title></head><body>`+
       table('Recursos', headersRec, exampleRec) +
       table('Atividades', headersAtv, exampleAtv) +
       table('HorasExternos', headersHoras, exampleHoras) +
       table('HorasExternosCfg', headersCfg, exampleCfg) +
-      table('HistoricoAtividades', headersHist, exampleHist) + // --- ADICIONADO ---
+      table('HistoricoAtividades', headersHist, exampleHist) +
+      table('Feriados', headersFeriados, exampleFeriados) +
       `</body></html>`;
     // Utilize download() para salvar o arquivo diretamente via navegador (sem exigir seleção de pasta)
     download('modelo_bd.xls', html, 'application/vnd.ms-excel');
@@ -2210,14 +2252,15 @@ const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
 if(btnExportModeloCSV){
   btnExportModeloCSV.onclick = () => {
     // Gera um modelo de BD em formato CSV único com coluna "tabela".
-    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user']; // --- MODIFICADO ---
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend']; // --- MODIFICADO ---
     const sample = [
       {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
       {tabela:'atividade',id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100},
       {tabela:'hora_externo',id:'R1',date:'2025-01-15',minutos:480,tipoHora:'trabalho',projeto:'Alca Analitico'},
       {tabela:'hora_cfg',id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'},
       // --- INÍCIO DA MODIFICAÇÃO ---
-      {tabela:'historico', activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'}
+      {tabela:'historico', activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'},
+      {tabela:'feriado', date:'2025-12-25', legend:'Natal'}
       // --- FIM DA MODIFICAÇÃO ---
     ];
     const rows = [headers.join(',')];
