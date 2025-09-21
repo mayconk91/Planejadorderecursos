@@ -1,6 +1,7 @@
-/* enhancer2.js - Gestão de Horas (Externos) + Toolbar FSA (robusta) + Previsão de Fim */
+/* enhancer2.js - Gestão de Horas (Externos) + Toolbar FSA (robusta) + Previsão de Fim com Legendas de Feriado */
 (() => {
   const DB = 'rv-enhancer-v2';
+  // --- MODIFICAÇÃO: 'feriados' agora é um array de objetos {date, legend} ---
   const state = { thresholdMin: 10*60, externos: {}, folder: null, feriados: [] };
   state.selResId = '';
   state.selProjName = '';
@@ -207,7 +208,8 @@
     
     const diasTrabalho = recurso.dias || {};
     const dowMap = { 0:'dom', 1:'seg', 2:'ter', 3:'qua', 4:'qui', 5:'sex', 6:'sab' };
-    const feriadosSet = new Set(state.feriados);
+    // --- MODIFICAÇÃO: Extrai apenas a data do objeto de feriados ---
+    const feriadosSet = new Set((state.feriados || []).map(f => f.date));
 
     while (diasUteisNecessarios > 0) {
       dataCorrente.setDate(dataCorrente.getDate() + 1);
@@ -258,13 +260,14 @@
       const panel = document.createElement('div');
       panel.id = 'tab-horas-panel';
       panel.className = 'tabpanel';
+      // --- MODIFICAÇÃO: Atualiza a dica de preenchimento dos feriados ---
       panel.innerHTML = `
         <section class="panel">
           <div id="rv-alertas" class="panel" style="border:1px dashed #bbb;margin-bottom:10px"></div>
           <h2>Gestão de Horas (Somente Recursos Externos)</h2>
           <div class="actions" style="display:flex;gap:8px;align-items:center;margin:8px 0">
             <label>Limiar de alerta (h) <input id="rv-th" type="number" min="0" style="width:90px"></label>
-            <button id="rv-th-apply">Aplicar</button>
+            <button id="rv-th-apply" class="btn">Aplicar</button>
           </div>
           <p class="muted small">Suporte a minutos (HH:MM). Ex.: 120:00 − 08:30 = 111:30.</p>
           <div id="rv-filters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0"></div>
@@ -272,15 +275,27 @@
         </section>
         <section class="panel">
             <h3>Cadastro de Feriados (para todos os recursos)</h3>
-            <p class="muted small">Informe um feriado por linha, no formato AAAA-MM-DD (ex: 2025-12-25).</p>
+            <p class="muted small">Informe um feriado por linha, no formato AAAA-MM-DD Legenda (ex: 2025-12-25 Natal).</p>
             <textarea id="rv-feriados" rows="8" style="width:100%; font-family:monospace;"></textarea>
             <button id="rv-feriados-save" class="btn" style="margin-top:8px;">Salvar Feriados</button>
         </section>`;
       host.appendChild(panel);
       q('#rv-th-apply').onclick = () => { const v = parseInt(q('#rv-th').value||'0',10); state.thresholdMin=(isNaN(v)?0:v)*60; save(); renderAlerts(); };
+      
+      // --- MODIFICAÇÃO: Lógica para salvar feriados com legenda ---
       q('#rv-feriados-save').onclick = () => {
         const txt = q('#rv-feriados').value || '';
-        state.feriados = txt.split('\n').map(line => line.trim()).filter(Boolean);
+        state.feriados = txt.split('\n').map(line => {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) return null;
+          const firstSpaceIndex = trimmedLine.indexOf(' ');
+          if (firstSpaceIndex === -1) {
+            return { date: trimmedLine, legend: '' }; // Apenas data
+          }
+          const date = trimmedLine.substring(0, firstSpaceIndex);
+          const legend = trimmedLine.substring(firstSpaceIndex + 1).trim();
+          return { date, legend };
+        }).filter(Boolean); // Remove linhas nulas
         save();
         render(); 
         alert('Feriados salvos com sucesso!');
@@ -301,9 +316,10 @@
 
   function render(){
     const cont = q('#rv-externos'); if (!cont) return;
+    // --- MODIFICAÇÃO: Popula o textarea com data e legenda ---
     const feriadosTextarea = q('#rv-feriados');
     if (feriadosTextarea) {
-        feriadosTextarea.value = (state.feriados || []).join('\n');
+        feriadosTextarea.value = (state.feriados || []).map(f => `${f.date} ${f.legend}`.trim()).join('\n');
     }
 
     let recs = getExternos();
@@ -560,22 +576,18 @@
   });
 
   try {
-    // --- INÍCIO DA MODIFICAÇÃO: Funções ponte para Feriados ---
     window.getFeriados = () => {
       return state.feriados || [];
     };
-
     window.setFeriados = (feriadosList = []) => {
       try {
-        // Garante que a lista seja um array de strings (datas YYYY-MM-DD)
         state.feriados = Array.isArray(feriadosList) 
-          ? feriadosList.map(f => (typeof f === 'object' ? f.data : f)).filter(Boolean) 
+          ? feriadosList.map(f => (typeof f === 'object' ? {date: f.date, legend: f.legend || ''} : {date: f, legend: ''})).filter(f => f.date) 
           : [];
         save();
         if (typeof render === 'function') render();
       } catch (e) {}
     };
-    // --- FIM DA MODIFICAÇÃO ---
     
     window.getHorasExternosData = () => {
       const list = [];
