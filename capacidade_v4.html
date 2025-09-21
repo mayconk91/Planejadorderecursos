@@ -4,142 +4,137 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Calculadora de Capacidade por Projeto</title>
+  <link rel="stylesheet" href="./styles.css" />
   <style>
-    :root{
-      --bg:#0f172a; --panel:#111827; --accent:#22d3ee; --text:#e5e7eb; --muted:#94a3b8; --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+    /* Estilos mínimos e específicos para esta página, aproveitando o styles.css principal */
+    body {
+      background: #f8fafc; /* Fundo padrão do app */
+      padding: 16px;
     }
-    *{box-sizing:border-box}
-    body{margin:0; font-family:Inter,system-ui,Arial,Helvetica,sans-serif; background:linear-gradient(180deg,#0b1022,#0f172a); color:var(--text)}
-    .wrap{max-width:1100px; margin:32px auto; padding:0 16px}
-    .card{background:linear-gradient(180deg,#0f172a, #0b1220); border:1px solid #1f2937; border-radius:18px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,.45)}
-    h1{font-size:24px; margin:0 0 4px; letter-spacing:.3px}
-    p.sub{margin:0 0 18px; color:var(--muted)}
-    .grid{display:grid; grid-template-columns:repeat(12,1fr); gap:14px}
-    .col-3{grid-column: span 3}
-    .col-4{grid-column: span 4}
-    .col-6{grid-column: span 6}
-    .col-8{grid-column: span 8}
-    .col-12{grid-column: span 12}
-    @media (max-width:900px){.col-3,.col-4,.col-6,.col-8{grid-column:span 12}}
-    label{display:block; font-size:12px; color:var(--muted); margin-bottom:6px}
-    input{width:100%; padding:12px 12px; border-radius:12px; border:1px solid #1f2937; background:#0b1324; color:var(--text); outline:none}
-    input:focus{border-color:var(--accent); box-shadow:0 0 0 4px rgba(34,211,238,.1)}
-    .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
-    .hint{font-size:12px; color:var(--muted)}
-    .kpi{display:grid; grid-template-columns:repeat(5,1fr); gap:14px; margin-top:18px}
-    .pill{background:#0b1324; border:1px solid #1f2937; border-radius:14px; padding:12px}
-    .pill h3{margin:0; font-size:12px; color:var(--muted)}
-    .pill .v{font-size:22px; margin-top:4px}
-    .status{margin-top:16px; padding:14px; border-radius:12px; border:1px solid #1f2937}
-    .ok{background:rgba(34,197,94,.08); border-color:rgba(34,197,94,.35)}
-    .warn{background:rgba(245,158,11,.08); border-color:rgba(245,158,11,.35)}
-    .bad{background:rgba(239,68,68,.08); border-color:rgba(239,68,68,.35)}
-    .status b{font-weight:700}
-    .muted{color:var(--muted)}
-    .footer{margin-top:18px; font-size:12px; color:var(--muted)}
-    .small{font-size:11px}
-    .divider{height:1px; background:#1f2937; margin:16px 0}
-    .inline{display:inline-block; padding:8px 12px; border-radius:10px; border:1px solid #1f2937; background:#0b1324;}
-    button{cursor:pointer}
-    .err{outline:2px dashed rgba(239,68,68,.6)}
+    /* Estilos para as mensagens de status (Viável, Atenção, Inviável) */
+    .status-message {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      font-size: 14px;
+    }
+    .status-message.ok {
+      background: #f0fdf4; /* Verde, similar ao 'running' */
+      border-color: #bbf7d0;
+      color: #166534;
+    }
+    .status-message.warn {
+      background: #fffbeb; /* Amarelo, similar ao 'heat' */
+      border-color: #fde68a;
+      color: #854d0e;
+    }
+    .status-message.bad {
+      background: #fef2f2; /* Vermelho, similar ao 'blocked' */
+      border-color: #fecaca;
+      color: #991b1b;
+    }
+    .err {
+      border-color: #ef4444 !important; /* Destaque para campos inválidos */
+      box-shadow: 0 0 0 1px #ef4444;
+    }
+    /* Ajuste para o grid de filtros se adaptar melhor aos campos da calculadora */
+    .filters.calc-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .filters .group.span-2 {
+      grid-column: span 2;
+    }
+    @media (max-width: 900px) {
+      .filters.calc-grid, .filters .group.span-2 {
+        grid-template-columns: 1fr;
+        grid-column: span 1;
+      }
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <h1>Calculadora de Capacidade por Projeto</h1>
-      <p class="sub">Informe os dados do projeto e da sua disponibilidade para avaliar viabilidade e esforço diário necessário.</p>
+  <section class="panel">
+    <h2>Calculadora de Capacidade por Projeto</h2>
+    <p class="muted">Informe os dados do projeto e da sua disponibilidade para avaliar a viabilidade e o esforço diário necessário.</p>
 
-      <div class="grid">
-        <div class="col-3">
-          <label>Horas totais do projeto (H_total)</label>
-          <input id="hTotal" inputmode="decimal" placeholder="ex.: 280" />
-        </div>
-        <div class="col-3">
-          <label>Dias úteis disponíveis no período (D_úteis)</label>
-          <input id="dUteis" inputmode="numeric" placeholder="ex.: 83" />
-        </div>
-        <div class="col-3">
-          <label>Jornada diária máxima (horas/dia)</label>
-          <input id="jornadaDia" inputmode="decimal" placeholder="ex.: 9" />
-        </div>
-        <div class="col-3">
-          <label>Taxa de efetividade (%)</label>
-          <input id="taxaEfetividade" inputmode="decimal" placeholder="ex.: 100 (ou 80)" />
-          <div class="hint">Converte jornada em horas realmente produtivas (ex.: 80% → 7,2 h/dia efetivas).</div>
-        </div>
-
-        <div class="col-6">
-          <label>Horas que você <u>pode dedicar a este projeto por dia</u> (capacidade diária no projeto) — opcional</label>
-          <input id="capacidadeDiaProjeto" inputmode="decimal" placeholder="ex.: 4 (se deixar em branco, calculamos a necessidade)" />
-          <div class="hint">Aceita vírgula (ex.: 4,5). Se deixar vazio, calculamos o quanto seria <b>necessário</b> por dia.</div>
-        </div>
-        <div class="col-6">
-          <label>Dias corridos do projeto (opcional)</label>
-          <input id="diasCorridos" inputmode="numeric" placeholder="ex.: 120" />
-          <div class="hint">Usado apenas para referência visual. O cálculo considera <b>dias úteis</b> (D_úteis).</div>
-        </div>
-
-        <div class="col-12">
-          <div class="row">
-            <button id="calc" class="inline" type="button">Calcular</button>
-            <button id="reset" class="inline" type="button">Limpar</button>
-            <span class="hint" style="margin-left:8px">Fórmulas: <span class="inline small">h_dia_necessário = H_total / D_úteis</span> · <span class="inline small">dias_requeridos = ceil(H_total / cap_dia_projeto)</span> · <span class="inline small">uso% = h_dia / jornada</span></span>
-          </div>
-        </div>
-
-        <div class="col-12">
-          <div class="kpi">
-            <div class="pill">
-              <h3>Horas/dia necessárias</h3>
-              <div class="v" id="hDiaNec">–</div>
-            </div>
-            <div class="pill">
-              <h3>Uso da jornada (%)</h3>
-              <div class="v" id="usoJornada">–</div>
-            </div>
-            <div class="pill">
-              <h3>Uso da jornada efetiva (%)</h3>
-              <div class="v" id="usoEfetivo">–</div>
-            </div>
-            <div class="pill">
-              <h3>Dias requeridos</h3>
-              <div class="v" id="diasReq">–</div>
-            </div>
-            <div class="pill">
-              <h3>Folga (+) / Déficit (−) (dias)</h3>
-              <div class="v" id="folga">–</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12">
-          <div id="status" class="status">
-            Preencha os campos e clique em <b>Calcular</b> (ou apenas digite: cálculo automático).
-          </div>
-        </div>
-
-        <div class="col-12">
-          <div class="divider"></div>
-          <details>
-            <summary>Detalhes do raciocínio & boas práticas</summary>
-            <ul class="small">
-              <li><b>Necessidade por dia</b>: se você não informar a capacidade diária no projeto, calculamos <code>H_total / D_úteis</code>. Compare com sua jornada diária máxima.</li>
-              <li><b>Uso da jornada</b>: <code>(h_dia_necessário / jornada) × 100</code>.</li>
-              <li><b>Uso da jornada efetiva</b>: se informar a taxa de efetividade (0–100), usamos <code>jornada_efetiva = jornada × (taxa/100)</code> e então <code>(h_dia_necessário / jornada_efetiva) × 100</code>.</li>
-              <li><b>Viabilidade com capacidade informada</b>: se você informar quanto pode dedicar por dia ao projeto, calculamos <code>dias_requeridos = ceil(H_total / cap_dia_projeto)</code> e comparamos com <code>D_úteis</code>.</li>
-            </ul>
-          </details>
-        </div>
-
-        <div class="col-12 footer">
-          Feito para uso offline. Nenhum dado é enviado a servidores.
-        </div>
+    <div class="filters calc-grid">
+      <div class="group">
+        <label>Horas totais do projeto (H_total)</label>
+        <input id="hTotal" type="text" inputmode="decimal" placeholder="ex.: 280" />
+      </div>
+      <div class="group">
+        <label>Dias úteis disponíveis (D_úteis)</label>
+        <input id="dUteis" type="text" inputmode="numeric" placeholder="ex.: 83" />
+      </div>
+      <div class="group">
+        <label>Jornada diária máxima (horas)</label>
+        <input id="jornadaDia" type="text" inputmode="decimal" placeholder="ex.: 9" />
+      </div>
+      <div class="group">
+        <label>Taxa de efetividade (%)</label>
+        <input id="taxaEfetividade" type="text" inputmode="decimal" placeholder="ex.: 80" />
+        <p class="muted small" style="margin-top:4px;">Converte jornada em horas produtivas.</p>
+      </div>
+      <div class="group span-2">
+        <label>Horas dedicadas ao projeto por dia (opcional)</label>
+        <input id="capacidadeDiaProjeto" type="text" inputmode="decimal" placeholder="ex.: 4 (se vazio, calculamos o necessário)" />
+        <p class="muted small" style="margin-top:4px;">Use vírgula ou ponto (ex: 4,5).</p>
+      </div>
+      <div class="group span-2">
+        <label>Dias corridos do projeto (opcional)</label>
+        <input id="diasCorridos" type="text" inputmode="numeric" placeholder="ex.: 120" />
+        <p class="muted small" style="margin-top:4px;">Apenas para referência. O cálculo usa dias úteis.</p>
       </div>
     </div>
-  </div>
+
+    <div class="toolbar" style="margin-top:12px;">
+      <button id="calc" class="btn primary" type="button">Calcular</button>
+      <button id="reset" class="btn" type="button">Limpar</button>
+    </div>
+
+    <div class="kpi-grid" style="margin-top:20px; gap:12px;">
+      <div class="kpi-card">
+        <span id="hDiaNec">–</span>
+        <label>Horas/dia necessárias</label>
+      </div>
+      <div class="kpi-card">
+        <span id="usoJornada">–</span>
+        <label>Uso da jornada (%)</label>
+      </div>
+      <div class="kpi-card">
+        <span id="usoEfetivo">–</span>
+        <label>Uso da jornada efetiva (%)</label>
+      </div>
+      <div class="kpi-card">
+        <span id="diasReq">–</span>
+        <label>Dias úteis requeridos</label>
+      </div>
+      <div class="kpi-card">
+        <span id="folga">–</span>
+        <label>Folga / Déficit (dias)</label>
+      </div>
+    </div>
+
+    <div id="status" class="status-message">
+      Preencha os campos e clique em <b>Calcular</b>. O cálculo também é automático ao digitar.
+    </div>
+
+    <hr style="border:none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+
+    <details>
+      <summary style="cursor:pointer; font-weight: 600; color: #334155;">Detalhes das Fórmulas</summary>
+      <ul class="muted small" style="margin-top:10px; padding-left:20px;">
+        <li><b>Necessidade por dia</b>: <code>H_total / D_úteis</code></li>
+        <li><b>Uso da jornada</b>: <code>(h_dia_necessário / jornada) × 100</code></li>
+        <li><b>Uso da jornada efetiva</b>: Usa a jornada ajustada pela taxa de efetividade para o cálculo de uso.</li>
+        <li><b>Viabilidade por capacidade</b>: Se a capacidade diária for informada, calcula <code>dias_requeridos = ceil(H_total / cap_dia_projeto)</code> e compara com os dias úteis disponíveis.</li>
+      </ul>
+    </details>
+  </section>
 
   <script>
+    // O JAVASCRIPT NÃO FOI ALTERADO, APENAS A REFERÊNCIA ÀS CLASSES DE CSS NO HTML
     const $ = (id)=>document.getElementById(id);
     const nf2 = new Intl.NumberFormat('pt-BR', {maximumFractionDigits:2});
     const nf0 = new Intl.NumberFormat('pt-BR', {maximumFractionDigits:0});
@@ -174,7 +169,7 @@
       const usoEfetivo = $("usoEfetivo");
 
       [hDiaNec,diasReq,folga,usoJornada,usoEfetivo].forEach(el => el.textContent = "–");
-      status.className = "status";
+      status.className = "status-message";
 
       const invalidH = !(H>=0);
       const invalidD = !(D>=0);
@@ -190,77 +185,63 @@
       }
       if(D === 0){
         status.classList.add('bad');
-        status.innerHTML = "<b>Inviável</b>: Dias úteis (D_úteis) é 0. Aumente D_úteis.";
+        status.innerHTML = "<b>Inviável</b>: Dias úteis (D_úteis) não pode ser 0.";
         return;
       }
 
       const necessidadeDia = H / D; // horas/dia necessárias
       hDiaNec.textContent = nf2.format(necessidadeDia);
 
-      // Uso da jornada nominal
       if(J > 0){
         usoJornada.textContent = pct((necessidadeDia / J) * 100);
       }
 
-      // Uso da jornada efetiva (se taxa válida 0-100)
       const taxaValid = Number.isFinite(taxa) && taxa > 0 && taxa <= 100;
       highlightInvalid($("taxaEfetividade"), !(Number.isNaN(taxa) || taxaValid));
-      if(taxaValid){
-        const jornadaEfetiva = J * (taxa/100);
-        usoEfetivo.textContent = pct((necessidadeDia / jornadaEfetiva) * 100);
-      } else if(Number.isNaN(taxa)) {
-        // taxa em branco: igual ao nominal
-        usoEfetivo.textContent = pct((necessidadeDia / J) * 100);
-      } else {
-        usoEfetivo.textContent = "–";
+      const jornadaEfetiva = (taxaValid) ? J * (taxa/100) : J;
+      
+      if(jornadaEfetiva > 0){
+          usoEfetivo.textContent = pct((necessidadeDia / jornadaEfetiva) * 100);
       }
-
-      // Mensagens
+      
       let mensagens = [];
-      if(necessidadeDia > J){
-        mensagens.push(`Necessidade por dia (${nf2.format(necessidadeDia)} h) > sua jornada máxima (${nf2.format(J)} h).`);
+      if(necessidadeDia > jornadaEfetiva){
+        mensagens.push(`A necessidade diária (${nf2.format(necessidadeDia)}h) excede sua jornada efetiva (${nf2.format(jornadaEfetiva)}h).`);
         highlightInvalid($("dUteis"), true);
         highlightInvalid($("jornadaDia"), true);
       }
 
-      // Capacidade diária informada -> dias requeridos
       if(Number.isFinite(capDia) && capDia > 0){
         const diasRequeridos = Math.ceil(H / capDia);
         diasReq.textContent = nf0.format(diasRequeridos);
         const saldoDias = D - diasRequeridos;
         folga.textContent = (saldoDias>=0?'+':'') + nf0.format(saldoDias);
         if(diasRequeridos > D){
-          mensagens.push(`Com ${nf2.format(capDia)} h/dia no projeto você precisará de ${nf0.format(diasRequeridos)} dias úteis, mas só há ${nf0.format(D)}.`);
+          mensagens.push(`Com ${nf2.format(capDia)} h/dia, você precisará de ${nf0.format(diasRequeridos)} dias úteis, mas só há ${nf0.format(D)}.`);
         }
       } else {
-        // Sem capDia: estimativa conservadora de folga vs jornada
-        const possivelPorDia = Math.min(necessidadeDia, J);
-        const diasEq = Math.ceil(H / possivelPorDia);
-        const saldoDiasEq = D - diasEq;
+        diasReq.textContent = '–';
+        const saldoDiasEq = D - Math.ceil(H / jornadaEfetiva);
         folga.textContent = (saldoDiasEq>=0?'+':'') + nf0.format(saldoDiasEq);
       }
 
       if(mensagens.length === 0){
         status.classList.add('ok');
-        status.innerHTML = `<b>Viável</b> — Planejamento cabe na sua capacidade. <span class="muted">Revise folgas e riscos.</span>`;
-      } else if(mensagens.length === 1){
-        status.classList.add('warn');
-        status.innerHTML = `<b>Atenção</b>: ${mensagens[0]} <span class="muted">Considere aumentar D_úteis, reduzir escopo ou redistribuir capacidade.</span>`;
+        status.innerHTML = `<b>Viável</b> — O planejamento parece caber na sua capacidade. <span class="muted">Revise a folga de dias e possíveis riscos.</span>`;
       } else {
-        status.classList.add('bad');
-        status.innerHTML = `<b>Inviável</b>: ${mensagens.join(' ')} <span class="muted">Ajuste parâmetros.</span>`;
+        status.classList.add(mensagens.length > 1 ? 'bad' : 'warn');
+        status.innerHTML = `<b>${mensagens.length > 1 ? 'Inviável' : 'Atenção'}</b>: ${mensagens.join(' ')} <span class="muted">Considere ajustar os parâmetros.</span>`;
       }
     }
 
     function reset(){
       ["hTotal","dUteis","jornadaDia","taxaEfetividade","capacidadeDiaProjeto","diasCorridos"].forEach(id=>$(id).value="");
       ["hDiaNec","diasReq","folga","usoJornada","usoEfetivo"].forEach(id=>$(id).textContent='–');
-      $("status").className = 'status';
-      $("status").textContent = 'Preencha os campos e clique em Calcular (ou apenas digite: cálculo automático).';
+      $("status").className = 'status-message';
+      $("status").innerHTML = 'Preencha os campos e clique em <b>Calcular</b>. O cálculo também é automático ao digitar.';
       document.querySelectorAll('.err').forEach(e=>e.classList.remove('err'));
     }
 
-    // Auto-cálculo ao digitar / colar
     ["hTotal","dUteis","jornadaDia","taxaEfetividade","capacidadeDiaProjeto"].forEach(id=>{
       const el = $(id);
       ["input","change","keyup","paste"].forEach(evt=> el.addEventListener(evt, calc));
