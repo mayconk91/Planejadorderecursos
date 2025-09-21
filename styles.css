@@ -145,3 +145,32 @@ dialog{border:none;border-radius:14px;max-width:520px;width:92%;padding:0}
 .kpi-grid{display:flex;gap:16px;flex-wrap:wrap}
 .kpi-card{flex:1;min-width:120px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:12px;padding:12px;text-align:center}
 .kpi-card span{font-size:20px;font-weight:700;display:block;margin-bottom:6px}
+/* Estilos para a Assinatura (Rodapé) */
+.app-footer {
+  text-align: center;
+  margin-top: 32px;
+  padding: 24px 0;
+  border-top: 1px solid #e2e8f0; /* Linha sutil para separar do conteúdo */
+  font-size: 13px;
+  color: #64748b; /* Cor de texto mais suave */
+}
+
+.app-footer p {
+  margin: 0;
+  line-height: 1.6; /* Melhora a legibilidade */
+}
+
+.app-footer em {
+  font-style: italic;
+  color: #475569;
+}
+
+.app-footer a {
+  color: #059669; /* Cor verde do botão primário para destaque */
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.app-footer a:hover {
+  text-decoration: underline;
+}
