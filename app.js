@@ -174,6 +174,25 @@ function startBDWatcher() {
         const newActivities = (parsed.atividades || []).map(coerceActivity);
         const newHoras = parsed.horas || [];
         const newCfg = parsed.cfg || [];
+        // --- INÍCIO DA MODIFICAÇÃO ---
+        // Remontar o objeto trails a partir da lista plana
+        const newTrails = {};
+        (parsed.historico || []).forEach(h => {
+          const id = h.activityId;
+          if (!id) return;
+          if (!newTrails[id]) newTrails[id] = [];
+          newTrails[id].push({
+            ts: h.timestamp,
+            oldInicio: h.oldInicio,
+            oldFim: h.oldFim,
+            newInicio: h.newInicio,
+            newFim: h.newFim,
+            justificativa: h.justificativa,
+            user: h.user
+          });
+        });
+        // --- FIM DA MODIFICAÇÃO ---
+
         let changed = false;
         // Atualiza recursos se necessário
         if (JSON.stringify(resources) !== JSON.stringify(newResources)) {
@@ -187,6 +206,15 @@ function startBDWatcher() {
           saveLS(LS.act, activities);
           changed = true;
         }
+        // --- INÍCIO DA MODIFICAÇÃO ---
+        // Atualiza histórico (trails) se necessário
+        if (JSON.stringify(trails) !== JSON.stringify(newTrails)) {
+          trails = newTrails;
+          saveLS(LS.trail, trails);
+          changed = true;
+        }
+        // --- FIM DA MODIFICAÇÃO ---
+
         // Atualiza horas externas e configurações usando helpers do enhancer2
         let horasChanged = false;
         try {
@@ -1679,6 +1707,9 @@ function parseHTMLBDTables(htmlText){
   const tAtv = doc.querySelector('#Atividades') || doc.querySelector('table[data-name="Atividades"]') || doc.querySelector('table:nth-of-type(2)');
   // HorasExternos pode ser a terceira tabela ou ter id/data-name específico
   const tHoras = doc.querySelector('#HorasExternos') || doc.querySelector('table[data-name="HorasExternos"]') || doc.querySelector('table:nth-of-type(3)');
+  // --- INÍCIO DA MODIFICAÇÃO ---
+  const tHist = doc.querySelector('#HistoricoAtividades') || doc.querySelector('table[data-name="HistoricoAtividades"]');
+  // --- FIM DA MODIFICAÇÃO ---
   function tableToObjects(tbl){
     if(!tbl) return [];
     const rows=[...tbl.querySelectorAll('tr')].map(tr=>[...tr.cells].map(td=>td.textContent.trim()));
@@ -1691,6 +1722,9 @@ function parseHTMLBDTables(htmlText){
   const recursos = tableToObjects(tRec);
   const atividades = tableToObjects(tAtv);
   const horasRows = tableToObjects(tHoras);
+  // --- INÍCIO DA MODIFICAÇÃO ---
+  const historico = tableToObjects(tHist);
+  // --- FIM DA MODIFICAÇÃO ---
   // Coerce horas: expects columns id, date (ou data), minutos ou horas, tipo, projeto
   const horas = horasRows.map(h=>{
     const id = h.id || h.ID || h.resourceId || h.RecursoID || h.colaborador || h.Colaborador || '';
@@ -1729,7 +1763,7 @@ function parseHTMLBDTables(htmlText){
       return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
     });
   }
-  return { recursos, atividades, horas, cfg };
+  return { recursos, atividades, horas, cfg, historico }; // --- MODIFICADO ---
 }
 
 /**
@@ -1741,7 +1775,7 @@ function parseHTMLBDTables(htmlText){
  */
 function parseCSVBDUnico(text){
   const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
-  if(lines.length===0) return {recursos:[], atividades:[], horas:[]};
+  if(lines.length===0) return {recursos:[], atividades:[], horas:[], historico:[]}; // --- MODIFICADO ---
   const sep = lines[0].includes(';')?';':',';
   const headers = lines[0].split(sep).map(h=>h.trim());
   const rows = lines.slice(1).map(l=>{
@@ -1760,6 +1794,9 @@ function parseCSVBDUnico(text){
   });
   const recursos = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('recurso')).map(coerceResource);
   const atividades = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('atividade')).map(coerceActivity);
+  // --- INÍCIO DA MODIFICAÇÃO ---
+  const historico = rows.filter(r=>String(r.tabela||'').toLowerCase().startsWith('historico'));
+  // --- FIM DA MODIFICAÇÃO ---
   // Horas externas: linhas onde tabela começa com "hora" mas não hora_cfg
   const horas = rows.filter(r => {
     const tab = String(r.tabela || '').toLowerCase();
@@ -1794,7 +1831,7 @@ function parseCSVBDUnico(text){
     const projetos = r.projetos || r.Projetos || '';
     return { id: String(rid), horasDia: horasDia, dias: dias, projetos: projetos };
   });
-  return { recursos, atividades, horas, cfg };
+  return { recursos, atividades, horas, cfg, historico }; // --- MODIFICADO ---
 }
 
 // === Persistência do BD selecionado ===
@@ -1826,41 +1863,54 @@ async function saveBD() {
       }
     } catch(e){}
     if (bdFileExt === 'csv') {
-      // CSV único com coluna tabela. Adicionamos colunas extras para configuração.
-      const header = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos'];
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      // CSV único com coluna tabela. Adicionamos colunas extras para configuração e histórico.
+      const header = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos','activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user'];
       const rows = [];
+      // --- FIM DA MODIFICAÇÃO ---
       // Recursos
       resources.forEach(r => {
         rows.push({
           tabela:'recurso', id:r.id, nome:r.nome, tipo:r.tipo, senioridade:r.senioridade,
-          capacidade:r.capacidade, ativo:r.ativo?'S':'N', inicioAtivo:r.inicioAtivo||'', fimAtivo:r.fimAtivo||'',
-          titulo:'', resourceId:'', inicio:'', fim:'', status:'', alocacao:'', date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:''
+          capacidade:r.capacidade, ativo:r.ativo?'S':'N', inicioAtivo:r.inicioAtivo||'', fimAtivo:r.fimAtivo||''
         });
       });
       // Atividades
       activities.forEach(a => {
         rows.push({
-          tabela:'atividade', id:a.id, nome:'', tipo:'', senioridade:'', capacidade:'', ativo:'', inicioAtivo:'', fimAtivo:'',
-          titulo:a.titulo, resourceId:a.resourceId, inicio:a.inicio, fim:a.fim, status:a.status, alocacao:a.alocacao,
-          date:'', minutos:'', tipoHora:'', projeto:'', horasDia:'', dias:'', projetos:''
+          tabela:'atividade', id:a.id, titulo:a.titulo, resourceId:a.resourceId, inicio:a.inicio, fim:a.fim, status:a.status, alocacao:a.alocacao
         });
       });
       // Horas
       horasList.forEach(h => {
         rows.push({
-          tabela:'hora_externo', id:h.id, nome:'', tipo:'', senioridade:'', capacidade:'', ativo:'', inicioAtivo:'', fimAtivo:'',
-          titulo:'', resourceId:'', inicio:'', fim:'', status:'', alocacao:'',
-          date:h.date || '', minutos:h.minutos, tipoHora:h.tipo || '', projeto:h.projeto || '', horasDia:'', dias:'', projetos:''
+          tabela:'hora_externo', id:h.id, date:h.date || '', minutos:h.minutos, tipoHora:h.tipo || '', projeto:h.projeto || ''
         });
       });
       // Configurações
       cfgList.forEach(cfg => {
         rows.push({
-          tabela:'hora_cfg', id:cfg.id, nome:'', tipo:'', senioridade:'', capacidade:'', ativo:'', inicioAtivo:'', fimAtivo:'',
-          titulo:'', resourceId:'', inicio:'', fim:'', status:'', alocacao:'', date:'', minutos:'', tipoHora:'', projeto:'',
-          horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || ''
+          tabela:'hora_cfg', id:cfg.id, horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || ''
         });
       });
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      // Histórico de Atividades
+      Object.keys(trails).forEach(activityId => {
+        (trails[activityId] || []).forEach(entry => {
+          rows.push({
+            tabela: 'historico',
+            activityId: activityId,
+            timestamp: entry.ts,
+            oldInicio: entry.oldInicio,
+            oldFim: entry.oldFim,
+            newInicio: entry.newInicio,
+            newFim: entry.newFim,
+            justificativa: entry.justificativa,
+            user: entry.user
+          });
+        });
+      });
+      // --- FIM DA MODIFICAÇÃO ---
       // Converter rows para CSV
       const csvRows = [];
       csvRows.push(header.join(','));
@@ -1877,7 +1927,7 @@ async function saveBD() {
       content = csvRows.join('\n');
       mime = 'text/csv;charset=utf-8';
     } else {
-      // HTML (xls compatível) com três tabelas: Recursos, Atividades, HorasExternos e HorasExternosCfg
+      // HTML (xls compatível) com tabelas
       function tableHTML(title, headers, rows) {
         const thead = headers.map(h => `<th>${h}</th>`).join('');
         const tbody = rows.map(r => `<tr>${headers.map(h => `<td>${r[h] ?? ''}</td>`).join('')}</tr>`).join('');
@@ -1899,12 +1949,32 @@ async function saveBD() {
       // HorasExternosCfg table
       const headersCfg = ['id','horasDia','dias','projetos'];
       const cfgRows = cfgList.map(cfg => ({ id: cfg.id, horasDia: cfg.horasDia || '', dias: cfg.dias || '', projetos: cfg.projetos || '' }));
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      // HistoricoAtividades table
+      const headersHist = ['activityId', 'timestamp', 'oldInicio', 'oldFim', 'newInicio', 'newFim', 'justificativa', 'user'];
+      const histRows = [];
+      Object.keys(trails).forEach(activityId => {
+          (trails[activityId] || []).forEach(entry => {
+              histRows.push({
+                  activityId: activityId,
+                  timestamp: entry.ts,
+                  oldInicio: entry.oldInicio,
+                  oldFim: entry.oldFim,
+                  newInicio: entry.newInicio,
+                  newFim: entry.newFim,
+                  justificativa: entry.justificativa,
+                  user: entry.user
+              });
+          });
+      });
       content = `<!doctype html><html><head><meta charset='utf-8'><title>BD</title></head><body>`+
         tableHTML('Recursos', headersRec, recRows) +
         tableHTML('Atividades', headersAtv, atvRows) +
         tableHTML('HorasExternos', headersHoras, horasRows) +
         tableHTML('HorasExternosCfg', headersCfg, cfgRows) +
+        tableHTML('HistoricoAtividades', headersHist, histRows) + // Nova tabela
         `</body></html>`;
+      // --- FIM DA MODIFICAÇÃO ---
       mime = 'text/html;charset=utf-8';
     }
     // Gravar no arquivo via FileSystemWritableFileStream
@@ -1945,21 +2015,42 @@ if(fileBD){
     try{
       const ext = f.name.toLowerCase().split('.').pop();
       const text = await f.text();
+      let parsed; // --- MODIFICADO ---
       if(ext==='csv'){
-        const parsed = parseCSVBDUnico(text);
+        parsed = parseCSVBDUnico(text); // --- MODIFICADO ---
         resources = (parsed.recursos || []).map(coerceResource);
         activities = (parsed.atividades || []).map(coerceActivity);
         if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
         if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
       } else {
-        const parsed = parseHTMLBDTables(text);
+        parsed = parseHTMLBDTables(text); // --- MODIFICADO ---
         resources = (parsed.recursos || []).map(coerceResource);
         activities = (parsed.atividades || []).map(coerceActivity);
         if(parsed.horas && typeof window.setHorasExternosData === 'function') window.setHorasExternosData(parsed.horas);
         if(parsed.cfg && typeof window.setHorasExternosConfig === 'function') window.setHorasExternosConfig(parsed.cfg);
       }
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      // Remontar o objeto trails a partir da lista plana lida do arquivo
+      const newTrails = {};
+      (parsed.historico || []).forEach(h => {
+        const id = h.activityId;
+        if (!id) return;
+        if (!newTrails[id]) newTrails[id] = [];
+        newTrails[id].push({
+          ts: h.timestamp,
+          oldInicio: h.oldInicio,
+          oldFim: h.oldFim,
+          newInicio: h.newInicio,
+          newFim: h.newFim,
+          justificativa: h.justificativa,
+          user: h.user
+        });
+      });
+      trails = newTrails;
+      // --- FIM DA MODIFICAÇÃO ---
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
+      saveLS(LS.trail, trails); // --- ADICIONADO ---
       renderAll();
       updateBDStatus('BD carregado: '+ f.name);
     } catch(e){ alert('Erro ao ler arquivo BD: '+ e.message); }
@@ -2028,8 +2119,28 @@ if(btnPickBDFile){
       if (parsed.cfg && typeof window.setHorasExternosConfig === 'function') {
         window.setHorasExternosConfig(parsed.cfg);
       }
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      // Remontar o objeto trails a partir da lista plana lida do arquivo
+      const newTrails = {};
+      (parsed.historico || []).forEach(h => {
+        const id = h.activityId;
+        if (!id) return;
+        if (!newTrails[id]) newTrails[id] = [];
+        newTrails[id].push({
+          ts: h.timestamp,
+          oldInicio: h.oldInicio,
+          oldFim: h.oldFim,
+          newInicio: h.newInicio,
+          newFim: h.newFim,
+          justificativa: h.justificativa,
+          user: h.user
+        });
+      });
+      trails = newTrails;
+      // --- FIM DA MODIFICAÇÃO ---
       saveLS(LS.res, resources);
       saveLS(LS.act, activities);
+      saveLS(LS.trail, trails); // --- ADICIONADO ---
       renderAll();
       updateBDStatus('BD carregado e pronto: ' + bdFileName);
       // Iniciar observação de alterações no arquivo BD
@@ -2071,6 +2182,11 @@ if(btnExportModeloXLS){
     // Example configuration for HorasExternosCfg
     const headersCfg = ['id','horasDia','dias','projetos'];
     const exampleCfg = [{id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'}];
+    // --- INÍCIO DA MODIFICAÇÃO ---
+    // Example for HistoricoAtividades
+    const headersHist = ['activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user'];
+    const exampleHist = [{activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'}];
+    // --- FIM DA MODIFICAÇÃO ---
     function table(title, headers, rows){
       const thead = headers.map(h=>`<th>${h}</th>`).join('');
       const tbody = rows.map(r=>`<tr>${headers.map(h=>`<td>${(r[h]??'')}</td>`).join('')}</tr>`).join('');
@@ -2081,6 +2197,7 @@ if(btnExportModeloXLS){
       table('Atividades', headersAtv, exampleAtv) +
       table('HorasExternos', headersHoras, exampleHoras) +
       table('HorasExternosCfg', headersCfg, exampleCfg) +
+      table('HistoricoAtividades', headersHist, exampleHist) + // --- ADICIONADO ---
       `</body></html>`;
     // Utilize download() para salvar o arquivo diretamente via navegador (sem exigir seleção de pasta)
     download('modelo_bd.xls', html, 'application/vnd.ms-excel');
@@ -2093,19 +2210,23 @@ const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
 if(btnExportModeloCSV){
   btnExportModeloCSV.onclick = () => {
     // Gera um modelo de BD em formato CSV único com coluna "tabela".
-    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos'];
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user']; // --- MODIFICADO ---
     const sample = [
-      {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:'',titulo:'',resourceId:'',inicio:'',fim:'',status:'',alocacao:'',date:'',minutos:'',tipoHora:'',projeto:'',horasDia:'',dias:'',projetos:''},
-      {tabela:'atividade',id:'A1',nome:'',tipo:'',senioridade:'',capacidade:'',ativo:'',inicioAtivo:'',fimAtivo:'',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100,date:'',minutos:'',tipoHora:'',projeto:'',horasDia:'',dias:'',projetos:''},
-      {tabela:'hora_externo',id:'R1',nome:'',tipo:'',senioridade:'',capacidade:'',ativo:'',inicioAtivo:'',fimAtivo:'',titulo:'',resourceId:'',inicio:'',fim:'',status:'',alocacao:'',date:'2025-01-15',minutos:480,tipoHora:'trabalho',projeto:'Alca Analitico',horasDia:'',dias:'',projetos:''},
-      {tabela:'hora_cfg',id:'R1',nome:'',tipo:'',senioridade:'',capacidade:'',ativo:'',inicioAtivo:'',fimAtivo:'',titulo:'',resourceId:'',inicio:'',fim:'',status:'',alocacao:'',date:'',minutos:'',tipoHora:'',projeto:'',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'}
+      {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
+      {tabela:'atividade',id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100},
+      {tabela:'hora_externo',id:'R1',date:'2025-01-15',minutos:480,tipoHora:'trabalho',projeto:'Alca Analitico'},
+      {tabela:'hora_cfg',id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'},
+      // --- INÍCIO DA MODIFICAÇÃO ---
+      {tabela:'historico', activityId:'A1', timestamp:new Date().toISOString(), oldInicio:'2025-01-10', oldFim:'2025-01-20', newInicio:'2025-01-11', newFim:'2025-01-22', justificativa:'Ajuste de escopo', user:'usuário'}
+      // --- FIM DA MODIFICAÇÃO ---
     ];
     const rows = [headers.join(',')];
     sample.forEach(obj => {
       const line = headers.map(h => {
         const v = obj[h] ?? '';
-        // Envolver valores em aspas e escapar aspas internas
-        return '"' + String(v).replace(/"/g, '""') + '"';
+        // Preencher colunas vazias para manter a estrutura
+        const cleanV = String(v).replace(/"/g, '""');
+        return '"' + cleanV + '"';
       }).join(',');
       rows.push(line);
     });
