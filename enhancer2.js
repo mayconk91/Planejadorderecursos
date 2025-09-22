@@ -208,7 +208,6 @@
     
     const diasTrabalho = recurso.dias || {};
     const dowMap = { 0:'dom', 1:'seg', 2:'ter', 3:'qua', 4:'qui', 5:'sex', 6:'sab' };
-    // --- MODIFICAÇÃO: Extrai apenas a data do objeto de feriados ---
     const feriadosSet = new Set((state.feriados || []).map(f => f.date));
 
     while (diasUteisNecessarios > 0) {
@@ -260,7 +259,6 @@
       const panel = document.createElement('div');
       panel.id = 'tab-horas-panel';
       panel.className = 'tabpanel';
-      // --- MODIFICAÇÃO: Atualiza a dica de preenchimento dos feriados ---
       panel.innerHTML = `
         <section class="panel">
           <div id="rv-alertas" class="panel" style="border:1px dashed #bbb;margin-bottom:10px"></div>
@@ -282,7 +280,6 @@
       host.appendChild(panel);
       q('#rv-th-apply').onclick = () => { const v = parseInt(q('#rv-th').value||'0',10); state.thresholdMin=(isNaN(v)?0:v)*60; save(); renderAlerts(); };
       
-      // --- MODIFICAÇÃO: Lógica para salvar feriados com legenda ---
       q('#rv-feriados-save').onclick = () => {
         const txt = q('#rv-feriados').value || '';
         state.feriados = txt.split('\n').map(line => {
@@ -290,12 +287,12 @@
           if (!trimmedLine) return null;
           const firstSpaceIndex = trimmedLine.indexOf(' ');
           if (firstSpaceIndex === -1) {
-            return { date: trimmedLine, legend: '' }; // Apenas data
+            return { date: trimmedLine, legend: '' };
           }
           const date = trimmedLine.substring(0, firstSpaceIndex);
           const legend = trimmedLine.substring(firstSpaceIndex + 1).trim();
           return { date, legend };
-        }).filter(Boolean); // Remove linhas nulas
+        }).filter(Boolean);
         save();
         render(); 
         alert('Feriados salvos com sucesso!');
@@ -316,18 +313,21 @@
 
   function render(){
     // ===== INÍCIO DA MODIFICAÇÃO =====
-    // Adia o redesenho se o usuário estiver digitando nesta aba
+    // Adia o redesenho se o usuário estiver digitando em um campo de texto,
+    // mas permite a atualização após cliques em botões.
     const panel = q('#tab-horas-panel');
-    if (panel && panel.contains(document.activeElement)) {
-      return; 
+    const activeEl = document.activeElement;
+    if (panel && panel.contains(activeEl)) {
+        const tagName = activeEl.tagName.toUpperCase();
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
+            return; // Interrompe o render se o foco estiver em um campo de texto
+        }
     }
     // ===== FIM DA MODIFICAÇÃO =====
 
     const cont = q('#rv-externos'); if (!cont) return;
     const feriadosTextarea = q('#rv-feriados');
     if (feriadosTextarea) {
-        // Apenas atualiza o campo se o usuário não estiver digitando nele,
-        // para evitar que o "watcher" do BD apague o que está sendo inserido.
         if (document.activeElement !== feriadosTextarea) {
             feriadosTextarea.value = (state.feriados || []).map(f => `${f.date} ${f.legend}`.trim()).join('\n');
         }
