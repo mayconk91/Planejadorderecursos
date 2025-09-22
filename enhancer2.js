@@ -315,10 +315,18 @@
   };
 
   function render(){
+    // ===== INÍCIO DA MODIFICAÇÃO =====
+    // Adia o redesenho se o usuário estiver digitando nesta aba
+    const panel = q('#tab-horas-panel');
+    if (panel && panel.contains(document.activeElement)) {
+      return; 
+    }
+    // ===== FIM DA MODIFICAÇÃO =====
+
     const cont = q('#rv-externos'); if (!cont) return;
     const feriadosTextarea = q('#rv-feriados');
     if (feriadosTextarea) {
-        // MODIFICAÇÃO: Apenas atualiza o campo se o usuário não estiver digitando nele,
+        // Apenas atualiza o campo se o usuário não estiver digitando nele,
         // para evitar que o "watcher" do BD apague o que está sendo inserido.
         if (document.activeElement !== feriadosTextarea) {
             feriadosTextarea.value = (state.feriados || []).map(f => `${f.date} ${f.legend}`.trim()).join('\n');
