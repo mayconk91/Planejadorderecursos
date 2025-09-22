@@ -1148,25 +1148,48 @@ function bucketKey(d, gran){
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   }
 }
+// FUNÇÃO CORRIGIDA
 function renderAggregates(){
   aggCharts.innerHTML="";
   const gran=aggGran.value;
   const days=buildDays();
   const byRes=Object.fromEntries(resources.filter(r=>r.ativo).map(r=>[r.id,{}]));
+
+  // Pré-calcula o número de dias em cada "bucket" (semana/mês) para evitar contagem duplicada da capacidade
+  const daysPerBucket = {};
+  days.forEach(d => {
+    const key = bucketKey(d, gran);
+    if (!daysPerBucket[key]) daysPerBucket[key] = 0;
+    daysPerBucket[key]++;
+  });
+
+  // Calcula a soma total de alocação (numerador)
   activities.forEach(a=>{
     const r=resources.find(x=>x.id===a.resourceId && x.ativo);
     if(!r) return;
-    const cap=r.capacidade||100;
     for(let d of days){
       if(fromYMD(a.inicio)<=d && d<=fromYMD(a.fim)){
         const key=bucketKey(d,gran);
         const map=byRes[r.id];
-        if(!map[key]) map[key]={sum:0,capDays:0};
+        if(!map[key]) map[key]={sum:0, capDays:0}; // Inicializa
         map[key].sum += (a.alocacao||100);
-        map[key].capDays += cap;
       }
     }
   });
+
+  // Calcula a capacidade total correta (denominador), contando cada dia apenas uma vez
+  Object.keys(byRes).forEach(resourceId => {
+    const resource = resources.find(r => r.id === resourceId);
+    if (!resource) return;
+    const cap = resource.capacidade || 100;
+    const map = byRes[resourceId];
+    Object.keys(map).forEach(key => {
+      const numDays = daysPerBucket[key] || 0;
+      map[key].capDays = numDays * cap;
+    });
+  });
+  
+  // Renderiza os gráficos
   resources.filter(r=>r.ativo).forEach(r=>{
     const card=document.createElement("div");
     card.className="card";
@@ -1183,9 +1206,10 @@ function renderAggregates(){
     const barW=Math.max(8, (W - margin - 20) / Math.max(1, entries.length) - 6);
     entries.forEach((kv,idx)=>{
       const key=kv[0]; const v=kv[1];
-      const perc = v.capDays? Math.min(100, (v.sum / v.capDays) * 100) : 0;
+      const perc = v.capDays > 0 ? (v.sum / v.capDays) * 100 : 0;
       const x = margin + 10 + idx*(barW+6);
-      const y = (H - margin +10) - (perc/100)*(H - margin - 20);
+      const y = (H - margin +10) - (Math.min(100, perc)/100)*(H - margin - 20); // Limita a barra em 100% de altura visualmente
+      ctx.fillStyle = perc > 100 ? '#ef4444' : '#2563eb'; // Cor vermelha para sobrecarga
       ctx.fillRect(x, y, barW, (H - margin +10) - y);
       ctx.save(); ctx.translate(x+barW/2, H - margin + 18); ctx.rotate(-Math.PI/4); ctx.textAlign="right"; ctx.font="10px sans-serif"; ctx.fillText(key, 0, 0); ctx.restore();
       ctx.font="10px sans-serif"; ctx.fillText(Math.round(perc)+"%", x, y-4);
