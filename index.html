@@ -22,7 +22,6 @@
     <button class="tab active" data-tab="plan">Planejamento</button>
     <button class="tab" data-tab="exec">Visão Executiva</button>
     <button class="tab" data-tab="avail">Disponibilidade</button>
-    <!-- Nova aba para a calculadora de capacidade -->
     <button class="tab" data-tab="cap">Capacidade</button>
     <button class="tab" data-tab="util">Exportações & Backup</button>
   </nav>
@@ -56,6 +55,10 @@
       <div class="group grow">
         <label>Busca por título</label>
         <input id="buscaTitulo" placeholder="Digite parte do título da atividade" />
+      </div>
+      <div class="group">
+        <label>Busca por tag</label>
+        <input id="buscaTag" placeholder="Digite uma tag para filtrar" />
       </div>
       <div class="group">
         <label>Recurso</label>
@@ -121,6 +124,7 @@
               <th>Fim</th>
               <th>Status</th>
               <th>Alocação %</th>
+              <th>Tags</th>
               <th></th>
             </tr>
           </thead>
@@ -224,10 +228,8 @@
       </section>
     </div>
 
-    <!-- Nova aba de Capacidade: incorporamos a calculadora de capacidade como um iframe. -->
     <div id="tab-cap" class="tabpanel">
       <section class="panel">
-        <!-- iframe permite encapsular o conteúdo da calculadora sem interferir no restante da aplicação -->
         <iframe src="capacidade_v4.html" style="width:100%; min-height:600px; border:none;" title="Calculadora de Capacidade"></iframe>
       </section>
     </div>
@@ -239,13 +241,9 @@
         <div class="actions stack">
         <input id="currentUser" placeholder="Usuário atual (opcional)" class="userbox" />
         <div class="inline-actions" id="bdControls">
-          <!-- Botão removido: a seleção de pasta será solicitada automaticamente quando necessário -->
-          <!-- Leitura: permite importar um BD (sem permissão de escrita) via input de arquivo. -->
-          <!-- Importar BD apenas para leitura. Use esta opção se desejar apenas visualizar os dados sem gravar mudanças no arquivo. -->
           <label class="btn">📄 Importar BD (somente leitura)
             <input id="fileBD" type="file" accept=".xls,.html,.csv" class="hidden" />
           </label>
-          <!-- Selecionar BD com permissão de leitura e gravação. Esta é a opção recomendada para atualizar o arquivo em tempo real. -->
           <button id="btnPickBDFile" class="btn">📄 Selecionar BD (ler/gravar)</button>
           <button id="btnExportModeloXLS" class="btn">⬇️ Exportar modelo de BD (Excel)</button>
           <button id="btnExportModeloCSV" class="btn">⬇️ Exportar modelo de BD (CSV único)</button>
@@ -257,16 +255,13 @@
         <button id="btnHistAll" class="btn">Histórico (CSV consolidado)</button>
         <button id="btnBackup" class="btn">Backup (JSON)</button>
         <button id="btnExportPDF" class="btn primary">Exportar PDF (Visão Geral)</button>
-        <!-- Restaurar removido -->
-        <!-- Pasta de dados controls removidos (incorporados no bloco BD) -->
-      </div>
+        </div>
 <p class="muted">Dica: para alimentar por planilha, use "Selecionar BD (ler/gravar)" e o "Modelo de BD (Excel/CSV)". Se você usar "Importar BD (somente leitura)", as alterações não serão salvas no arquivo.</p>
       </section>
     </div>
 
   </div>
 
-  <!-- Dialog Recurso -->
   <dialog id="dlgRecurso">
     <form method="dialog" id="formRecurso" class="form">
       <h3 id="dlgRecursoTitulo">Novo Recurso</h3>
@@ -303,7 +298,6 @@
     </form>
   </dialog>
 
-  <!-- Dialog Atividade -->
   <dialog id="dlgAtividade">
     <form method="dialog" id="formAtividade" class="form">
       <h3 id="dlgAtividadeTitulo">Nova Atividade</h3>
@@ -316,7 +310,7 @@
         <label>Início <input type="date" name="inicio" required /></label>
         <label>Fim <input type="date" name="fim" required /></label>
       </div>
-<div class="grid2">
+      <div class="grid2">
         <label>Status
           <select name="status">
             <option>Planejada</option>
@@ -328,14 +322,16 @@
         </label>
         <label>Alocação diária (%) <input type="number" name="alocacao" min="1" max="1000" value="100" /></label>
       </div>
-<menu>
+      <label>Tags (separadas por vírgula)
+          <input name="tags" list="existingTags" placeholder="Ex: SAP, Teste, Documentação" />
+      </label>
+      <menu>
         <button value="cancel">Cancelar</button>
         <button id="btnSalvarAtividade" value="save" class="primary">Salvar</button>
       </menu>
     </form>
   </dialog>
 
-  <!-- Dialog Justificativa (alteração de datas) -->
   <dialog id="dlgJust">
     <form method="dialog" id="formJust" class="form">
       <h3>Justificativa da alteração de datas</h3>
@@ -350,7 +346,6 @@
     </form>
   </dialog>
 
-  <!-- Dialog Histórico da Atividade -->
   <dialog id="dlgHist">
     <form method="dialog" class="form">
       <h3>Histórico da Atividade</h3>
@@ -366,11 +361,8 @@
       </menu>
     </form>
   </dialog>
-
-  <div id="tooltip" class="tooltip hidden"></div>
-  <script src="./app.js"></script>
-  <script src="enhancer2.js"></script>
-  <script src="planner_enhancer.js"></script>
+  
+  <datalist id="existingTags"></datalist>
   <div id="tooltip" class="tooltip hidden"></div>
   <script src="./app.js"></script>
   <script src="enhancer2.js"></script>
@@ -385,4 +377,3 @@
   </footer>
   </body>
 </html>
-

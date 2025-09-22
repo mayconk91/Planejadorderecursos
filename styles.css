@@ -174,3 +174,10 @@ dialog{border:none;border-radius:14px;max-width:520px;width:92%;padding:0}
 .app-footer a:hover {
   text-decoration: underline;
 }
+
+/* Estilo para a badge de tag */
+.badge.tag {
+    background-color: #e0e7ff;
+    border-color: #a5b4fc;
+    color: #3730a3;
+}
