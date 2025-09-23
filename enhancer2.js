@@ -328,13 +328,24 @@
         }
     }
 
-    let recs = getExternos();
+    let allRecs = getExternos();
     q('#rv-th').value = Math.round((state.thresholdMin||0)/60);
     cont.innerHTML = '';
 
     let totalContratadoGeral = 0;
     let totalUtilizadoGeral = 0;
-    getExternos().forEach(r => {
+    
+    let resourcesParaCalcular = [];
+    if (state.selResId && state.selResId !== '__all__') {
+        const recursoSelecionado = allRecs.find(r => (r.id || r.nome) === state.selResId);
+        if (recursoSelecionado) {
+            resourcesParaCalcular.push(recursoSelecionado);
+        }
+    } else {
+        resourcesParaCalcular = allRecs;
+    }
+
+    resourcesParaCalcular.forEach(r => {
         const id = r.id || r.nome;
         const m = state.externos[id];
         if (m) {
@@ -364,15 +375,15 @@
     
     const fDiv = q('#rv-filters');
     if (fDiv) {
-      const ids = recs.map(r => r.id || r.nome);
+      const ids = allRecs.map(r => r.id || r.nome);
       if (state.selResId && state.selResId !== '__all__' && !ids.includes(state.selResId)) {
         state.selResId = '__all__';
       }
       if ((!state.selResId || state.selResId === '') && ids.length > 0) {
-        state.selResId = ids[0];
+        state.selResId = allRecs[0].id || allRecs[0].nome;
       }
       let resOpts = '<option value="__all__"' + (state.selResId === '__all__' ? ' selected' : '') + '>Todos os Recursos</option>';
-      recs.forEach(r => {
+      allRecs.forEach(r => {
         const id = r.id || r.nome;
         const selected = state.selResId === id ? ' selected' : '';
         resOpts += `<option value="${id}"${selected}>${r.nome}</option>`;
@@ -382,18 +393,19 @@
       if (resSel) resSel.onchange = e => { state.selResId = e.target.value; state.selProjName = ''; persistFilterState(); render(); };
     }
     
+    let recsParaExibir = allRecs;
     if (state.selResId && state.selResId !== '__all__') {
-      recs = recs.filter(r => (r.id || r.nome) === state.selResId);
+      recsParaExibir = allRecs.filter(r => (r.id || r.nome) === state.selResId);
     }
     
-    if (!recs.length){
+    if (!recsParaExibir.length){
       cont.innerHTML += '<p class="muted">Não há recursos externos para exibir.</p>';
       renderAlerts();
       return;
     }
 
     const _frag = document.createDocumentFragment();
-    recs.forEach(r => {
+    recsParaExibir.forEach(r => {
         const id = r.id || r.nome;
         if (!state.externos[id]) {
             const projObj = {};
@@ -524,7 +536,6 @@
     cont.querySelectorAll('.rv-proj-del').forEach(btn => btn.onclick = e => { e.stopPropagation(); const id = e.currentTarget.dataset.id; const proj = e.currentTarget.dataset.proj; if (confirm('Excluir projeto "' + proj + '"? Os lançamentos associados permanecerão.')) { delete state.externos[id].projetos[proj]; save(); render(); renderAlerts(); } });
     cont.querySelectorAll('.rv-proj-add').forEach(btn => btn.onclick = e => { const id = e.target.dataset.id; const name = prompt('Nome do novo projeto:'); if (!name) return; const nameTrim = name.trim(); if (!nameTrim) return; if (!state.externos[id].projetos) state.externos[id].projetos = {}; if (state.externos[id].projetos[nameTrim]) { alert('Projeto já existente'); return; } let horas = prompt('Horas contratadas para ' + nameTrim + ' (HH:MM ou decimal):', '0'); if (horas == null) return; horas = horas.trim(); const mins = parseHHMM(horas); if (isNaN(mins)) { alert('Horas inválidas'); return; } state.externos[id].projetos[nameTrim] = { contratadoMin: mins }; save(); render(); renderAlerts(); });
     
-    // ---> CÓDIGO RESTAURADO: Lógica para o botão "Lançar" <---
     cont.querySelectorAll('.rv-add').forEach(btn => btn.onclick = e => {
       const id = e.target.dataset.id;
       const card = e.target.closest('.panel');
@@ -588,7 +599,6 @@
       renderAlerts();
     });
 
-    // ---> CÓDIGO RESTAURADO: Lógica para o botão "Excluir" do histórico <---
     cont.querySelectorAll('.rv-del').forEach(btn => btn.onclick = e => { 
         e.stopPropagation(); 
         const id = e.currentTarget.dataset.id; 
