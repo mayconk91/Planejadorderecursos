@@ -370,3 +370,113 @@ dialog{border:none;border-radius:14px;max-width:520px;width:92%;padding:0}
 #tblRecursos, #tblAtividades {
     display: none;
 }
+/* Em styles.css */
+
+/* --- MELHORIAS PARA GESTÃO DE HORAS (ENHANCER2.JS) --- */
+
+/* 1. Cores contextuais para o resumo e outros elementos */
+.color-planned { color: #475569; } /* Cinza */
+.color-executed { color: #16a34a; } /* Verde */
+.color-balance { color: #2563eb; } /* Azul */
+
+/* 2. Estilo aprimorado para as tabelas da aba */
+.rv-table-enhanced {
+  width: 100%;
+  border-collapse: separate; /* Necessário para border-radius nas células */
+  border-spacing: 0;
+  font-size: 14px;
+}
+
+.rv-table-enhanced thead th {
+  background-color: #f8fafc;
+  padding: 12px 10px;
+  border-bottom: 2px solid #e2e8f0;
+  text-align: left;
+  font-weight: 600;
+  color: #334155;
+  position: sticky; /* Cabeçalho fixo */
+  top: 0;
+  z-index: 10;
+}
+
+.rv-table-enhanced tbody td {
+  padding: 14px 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.rv-table-enhanced tbody tr:nth-child(even) {
+  background-color: #f8fafc; /* Efeito zebrado suave */
+}
+
+/* 3. Alinhamento de colunas */
+.rv-table-enhanced .align-left { text-align: left; }
+.rv-table-enhanced .align-right { text-align: right; font-family: monospace; }
+
+/* 4. Badges de Status (Exemplo) */
+.badge-status {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+}
+.badge-status.ativo { background-color: #16a34a; } /* Verde */
+.badge-status.encerrado { background-color: #6b7280; } /* Cinza */
+
+/* 5. Ícones de apoio */
+.icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 6px;
+  vertical-align: -0.125em;
+}
+
+/* 6. Mini Progress Bar */
+.mini-progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mini-progress {
+  width: 100%;
+  height: 8px;
+  background-color: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.mini-progress-bar {
+  height: 100%;
+  background-color: #16a34a; /* Verde */
+  border-radius: 4px;
+  transition: width 0.3s ease-in-out;
+}
+.mini-progress-bar.over {
+  background-color: #ef4444; /* Vermelho para > 100% */
+}
+
+/* 7. Botões de ícone e menu de ações */
+.actions-cell {
+  text-align: right;
+}
+.actions-cell .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: background-color 0.2s, opacity 0.2s;
+}
+.actions-cell .btn-icon:hover {
+  background-color: #f1f5f9;
+  opacity: 1;
+}
+.actions-cell .btn-icon svg {
+  width: 16px;
+  height: 16px;
+}

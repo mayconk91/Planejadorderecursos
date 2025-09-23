@@ -1,7 +1,6 @@
-/* enhancer2.js - Gestão de Horas (Externos) + Toolbar FSA (robusta) + Previsão de Fim com Legendas de Feriado */
+/* enhancer2.js - Gestão de Horas (Externos) - Versão Aprimorada com Melhorias de UI/UX */
 (() => {
   const DB = 'rv-enhancer-v2';
-  // --- MODIFICAÇÃO: 'feriados' agora é um array de objetos {date, legend} ---
   const state = { thresholdMin: 10*60, externos: {}, folder: null, feriados: [] };
   state.selResId = '';
   state.selProjName = '';
@@ -164,6 +163,7 @@
         }
       }
     } catch {}
+    // Fallback para uma tabela que pode não existir mais, mantido por segurança
     const rows = qa('#tblRecursos tbody tr');
     if (rows.length) {
       const out = [];
@@ -267,9 +267,8 @@
             <label>Limiar de alerta (h) <input id="rv-th" type="number" min="0" style="width:90px"></label>
             <button id="rv-th-apply" class="btn">Aplicar</button>
           </div>
-          <p class="muted small">Suporte a minutos (HH:MM). Ex.: 120:00 − 08:30 = 111:30.</p>
-          <div id="rv-filters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0"></div>
-          <div id="rv-externos"></div>
+          <div id="rv-filters" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0; padding: 10px; background-color: #f8fafc; border-radius: 8px;"></div>
+          <div id="rv-externos" style="margin-top: 16px;"></div>
         </section>
         <section class="panel">
             <h3>Cadastro de Feriados (para todos os recursos)</h3>
@@ -312,18 +311,14 @@
   };
 
   function render(){
-    // ===== INÍCIO DA MODIFICAÇÃO =====
-    // Adia o redesenho se o usuário estiver digitando em um campo de texto,
-    // mas permite a atualização após cliques em botões.
     const panel = q('#tab-horas-panel');
     const activeEl = document.activeElement;
     if (panel && panel.contains(activeEl)) {
         const tagName = activeEl.tagName.toUpperCase();
         if (tagName === 'INPUT' || tagName === 'TEXTAREA') {
-            return; // Interrompe o render se o foco estiver em um campo de texto
+            return;
         }
     }
-    // ===== FIM DA MODIFICAÇÃO =====
 
     const cont = q('#rv-externos'); if (!cont) return;
     const feriadosTextarea = q('#rv-feriados');
@@ -336,6 +331,37 @@
     let recs = getExternos();
     q('#rv-th').value = Math.round((state.thresholdMin||0)/60);
     cont.innerHTML = '';
+
+    let totalContratadoGeral = 0;
+    let totalUtilizadoGeral = 0;
+    getExternos().forEach(r => {
+        const id = r.id || r.nome;
+        const m = state.externos[id];
+        if (m) {
+            totalContratadoGeral += Object.values(m.projetos || {}).reduce((sum, p) => sum + (p.contratadoMin || 0), 0);
+            totalUtilizadoGeral += (m.ledger || []).reduce((sum, entry) => sum + (entry.minutos || 0), 0);
+        }
+    });
+    const saldoGeral = totalContratadoGeral - totalUtilizadoGeral;
+
+    const resumoHTML = `
+    <div class="kpi-grid" style="margin-bottom: 20px; gap: 12px;">
+        <div class="kpi-card">
+        <span class="color-planned">⏱️ ${fmtHHMM(totalContratadoGeral)}</span>
+        <label>Total de Horas Contratadas</label>
+        </div>
+        <div class="kpi-card">
+        <span class="color-executed">✅ ${fmtHHMM(totalUtilizadoGeral)}</span>
+        <label>Total de Horas Utilizadas</label>
+        </div>
+        <div class="kpi-card">
+        <span class="color-balance">saldo ${fmtHHMM(saldoGeral)}</span>
+        <label>Saldo Geral de Horas</label>
+        </div>
+    </div>
+    `;
+    cont.innerHTML += resumoHTML;
+    
     const fDiv = q('#rv-filters');
     if (fDiv) {
       const ids = recs.map(r => r.id || r.nome);
@@ -345,143 +371,182 @@
       if ((!state.selResId || state.selResId === '') && ids.length > 0) {
         state.selResId = ids[0];
       }
-      let resOpts = '<option value="__all__"' + (state.selResId === '__all__' ? ' selected' : '') + '>Todos</option>';
+      let resOpts = '<option value="__all__"' + (state.selResId === '__all__' ? ' selected' : '') + '>Todos os Recursos</option>';
       recs.forEach(r => {
         const id = r.id || r.nome;
         const selected = state.selResId === id ? ' selected' : '';
         resOpts += `<option value="${id}"${selected}>${r.nome}</option>`;
       });
-      let projOpts = '<option value="">Todos</option>';
-      if (state.selResId && state.selResId !== '__all__') {
-        const selExt = state.externos[state.selResId];
-        const projNames = selExt ? Object.keys(selExt.projetos || {}) : [];
-        projNames.forEach(name => {
-          const sel = state.selProjName === name ? ' selected' : '';
-          projOpts += `<option value="${name}"${sel}>${name}</option>`;
-        });
-        if (state.selProjName && !projNames.includes(state.selProjName)) state.selProjName = '';
-      } else {
-        state.selProjName = '';
-      }
-      fDiv.innerHTML = `
-        <label>Recurso: <select id="rv-filter-res">${resOpts}</select></label>
-        <label>Projeto: <select id="rv-filter-proj">${projOpts}</select></label>
-        <label>Busca: <input id="rv-filter-text" value="${state.filterText||''}" placeholder="Buscar"/></label>
-      `;
+      fDiv.innerHTML = `<label>Recurso: <select id="rv-filter-res">${resOpts}</select></label>`;
       const resSel = fDiv.querySelector('#rv-filter-res');
-      const projSel = fDiv.querySelector('#rv-filter-proj');
-      const textInp = fDiv.querySelector('#rv-filter-text');
       if (resSel) resSel.onchange = e => { state.selResId = e.target.value; state.selProjName = ''; persistFilterState(); render(); };
-      if (projSel) projSel.onchange = e => { state.selProjName = e.target.value; persistFilterState(); render(); };
-      if (textInp) { textInp.oninput = debounce(e => { state.filterText = (textInp.value || '').toLowerCase(); persistFilterState(); render(); }, 200); }
     }
+    
     if (state.selResId && state.selResId !== '__all__') {
       recs = recs.filter(r => (r.id || r.nome) === state.selResId);
     }
-    if (state.filterText) {
-      const t = state.filterText;
-      recs = recs.filter(r => {
-        const nameMatch = r.nome.toLowerCase().includes(t);
-        let projMatch = false;
-        const ext = state.externos[r.id || r.nome];
-        if (ext) { projMatch = Object.keys(ext.projetos || {}).some(pn => pn.toLowerCase().includes(t)); } 
-        else if (Array.isArray(r.projetos)) { projMatch = r.projetos.some(pn => pn && pn.toLowerCase().includes(t)); }
-        return nameMatch || projMatch;
-      });
-    }
+    
     if (!recs.length){
-      cont.innerHTML = '<p class="muted">Não há recursos externos visíveis. Acesse a aba Planejamento primeiro ou cadastre recursos externos.</p>';
+      cont.innerHTML += '<p class="muted">Não há recursos externos para exibir.</p>';
       renderAlerts();
       return;
     }
+
     const _frag = document.createDocumentFragment();
     recs.forEach(r => {
-      const id = r.id || r.nome;
-      if (!state.externos[id]) {
-        const projObj = {};
-        (r.projetos || []).forEach(name => { if (name && !projObj[name]) projObj[name] = { contratadoMin: 0 }; });
-        state.externos[id] = { horasDiaMin: 0, dias: { seg:true, ter:true, qua:true, qui:true, sex:true, sab:false, dom:false }, ledger: [], projetos: projObj };
-      }
-      const m = state.externos[id];
-      const usedPerProj = {};
-      (m.ledger || []).forEach(e => {
-        const pname = e.projeto || '';
-        if (!usedPerProj[pname]) usedPerProj[pname] = 0;
-        usedPerProj[pname] += e.minutos || 0;
-      });
-      const totalContract = Object.values(m.projetos || {}).reduce((sum, p) => sum + (p.contratadoMin || 0), 0);
-      const totalUsed = Object.values(usedPerProj).reduce((sum, v) => sum + v, 0);
-      const totalSaldo = totalContract - totalUsed;
-      const projectRows = Object.keys(m.projetos || {}).map(name => {
-        const contrMin = m.projetos[name].contratadoMin || 0;
-        const usedMin = usedPerProj[name] || 0;
-        const saldoMin = contrMin - usedMin;
-        return `<tr data-proj="${name}"><td>${name}</td><td><input class="rv-proj-contr" data-id="${id}" data-proj="${name}" value="${fmtHHMM(contrMin)}"/></td><td>${fmtHHMM(usedMin)}</td><td>${fmtHHMM(saldoMin)}</td><td><button class="rv-proj-del btn danger" data-id="${id}" data-proj="${name}">Excluir</button></td></tr>`;
-      }).join('');
-      const projOptions = Object.keys(m.projetos || {}).map(name => `<option value="${name}">${name}</option>`).join('');
-      
-      const previsaoFim = calcularPrevisaoFim(id);
+        const id = r.id || r.nome;
+        if (!state.externos[id]) {
+            const projObj = {};
+            (r.projetos || []).forEach(name => { if (name && !projObj[name]) projObj[name] = { contratadoMin: 0 }; });
+            if(Object.keys(projObj).length === 0) projObj['Geral'] = { contratadoMin: 0 };
+            state.externos[id] = { horasDiaMin: 0, dias: { seg:true, ter:true, qua:true, qui:true, sex:true, sab:false, dom:false }, ledger: [], projetos: projObj };
+        }
+        const m = state.externos[id];
+        
+        const usedPerProj = {};
+        (m.ledger || []).forEach(e => {
+            const pname = e.projeto || 'Geral';
+            if (!usedPerProj[pname]) usedPerProj[pname] = 0;
+            usedPerProj[pname] += e.minutos || 0;
+        });
 
-      const card = document.createElement('div');
-      card.className = 'rv-card';
-      card.innerHTML = `
-        <div class="rv-grid">
-          <div><span class="rv-badge">Recurso</span> <b>${r.nome}</b></div>
-          <label>Horas por dia (HH:MM)<input class="rv-dia" data-id="${id}" value="${fmtHHMM(m.horasDiaMin)}"/></label>
-          <div><div class="muted small">Dias de trabalho</div><div class="rv-days" data-id="${id}">${['seg','ter','qua','qui','sex','sab','dom'].map(d=>`<label><input type="checkbox" data-day="${d}" ${m.dias[d]?'checked':''}/> ${{seg:'Seg',ter:'Ter',qua:'Qua',qui:'Qui',sex:'Sex',sab:'Sáb',dom:'Dom'}[d]}</label>`).join(' ')}</div></div>
-          <div>
-            <div><span class="rv-badge">Consumido total</span> <b>${fmtHHMM(totalUsed)}</b></div>
-            <div><span class="rv-badge">Saldo total</span> <b>${fmtHHMM(totalSaldo)}</b></div>
-            <div><span class="rv-badge">Previsão de Fim</span> <b id="rv-previsao-${id}">${previsaoFim || '–'}</b></div>
-          </div>
+        const totalSaldo = Object.values(m.projetos || {}).reduce((sum, p) => sum + (p.contratadoMin || 0), 0) - (m.ledger || []).reduce((sum, entry) => sum + (entry.minutos || 0), 0);
+        const previsaoFim = calcularPrevisaoFim(id);
+        const status = totalSaldo > 0 ? { text: 'Ativo', class: 'ativo' } : { text: 'Encerrado', class: 'encerrado' };
+
+        const iconUser = '👤';
+        const iconCalendar = '📅';
+        const iconDelete = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="#ef4444"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>';
+
+        const projectRows = Object.keys(m.projetos || {}).map(name => {
+            const contrMin = m.projetos[name].contratadoMin || 0;
+            const usedMin = usedPerProj[name] || 0;
+            const saldoMin = contrMin - usedMin;
+            const progress = contrMin > 0 ? (usedMin / contrMin) * 100 : 0;
+            
+            return `
+                <tr data-proj="${name}">
+                <td class="align-left">${name} <input class="rv-proj-contr" type="hidden" data-id="${id}" data-proj="${name}" value="${fmtHHMM(contrMin)}"/></td>
+                <td class="align-right">
+                    <div class="mini-progress-container">
+                        <span>${fmtHHMM(usedMin)} / ${fmtHHMM(contrMin)}</span>
+                        <div class="mini-progress" title="${progress.toFixed(1)}% utilizado">
+                            <div class="mini-progress-bar ${progress > 100 ? 'over' : ''}" style="width: ${Math.min(progress, 100)}%;"></div>
+                        </div>
+                    </div>
+                </td>
+                <td class="align-right color-balance">${fmtHHMM(saldoMin)}</td>
+                <td class="actions-cell"><button class="rv-proj-del btn-icon" title="Excluir Projeto" data-id="${id}" data-proj="${name}">${iconDelete}</button></td>
+                </tr>`;
+        }).join('');
+
+        const projOptions = Object.keys(m.projetos || {}).map(name => `<option value="${name}">${name}</option>`).join('');
+        const formatDate = (ymd) => ymd.split('-').reverse().join('/');
+
+        const card = document.createElement('div');
+        card.className = 'panel'; 
+        card.style.marginBottom = '16px';
+        card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+            <div>
+                <h3 style="margin: 0 0 8px 0;">${iconUser} ${r.nome}</h3>
+                <div><span class="badge-status ${status.class}">${status.text}</span></div>
+            </div>
+            <div style="text-align: right;">
+                <div class="muted small">${iconCalendar} Previsão de Fim</div>
+                <div style="font-size: 1.1em; font-weight: 600;">${previsaoFim || 'N/A'}</div>
+            </div>
         </div>
+        
         <div class="rv-proj-container">
-          <table class="tbl rv-proj-table"><thead><tr><th>Projeto</th><th>Contratado</th><th>Consumido</th><th>Saldo</th><th></th></tr></thead><tbody>${projectRows}</tbody></table>
-          <button class="rv-proj-add btn" data-id="${id}">+ Projeto</button>
+            <h4 style="margin: 16px 0 8px 0;">Projetos</h4>
+            <table class="tbl rv-table-enhanced">
+            <thead><tr><th class="align-left">Projeto (Clique no nome para editar horas)</th><th class="align-right">Consumido vs. Contratado</th><th class="align-right">Saldo</th><th></th></tr></thead>
+            <tbody>${projectRows}</tbody>
+            </table>
+            <div style="margin-top: 12px;">
+                <button class="rv-proj-add btn" data-id="${id}">+ Novo Projeto</button>
+            </div>
         </div>
-        <div class="rv-entry">
-          <input type="date" class="rv-date-start" data-id="${id}"/>
-          <input type="date" class="rv-date-end" data-id="${id}"/>
-          <select class="rv-rec" data-id="${id}"><option value="once">Única</option><option value="daily">Diária</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option></select>
-          <input class="rv-hours" placeholder="Horas (HH:MM ou decimal)" data-id="${id}"/>
-          <select class="rv-tipo" data-id="${id}"><option value="normal">Normal</option><option value="extra">Extra</option></select>
-          <select class="rv-proj-select" data-id="${id}"><option value="">Selecione o projeto</option>${projOptions}</select>
-          <button class="rv-add btn" data-id="${id}">Adicionar</button>
+        
+        <div style="margin-top: 24px;">
+            <h4 style="margin: 16px 0 8px 0;">Lançar Horas</h4>
+            <div class="rv-entry">
+            <input type="date" class="rv-date-start" data-id="${id}"/>
+            <input type="date" class="rv-date-end" data-id="${id}"/>
+            <select class="rv-rec" data-id="${id}"><option value="once">Única</option><option value="daily">Diária</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option></select>
+            <input class="rv-hours" placeholder="Horas (HH:MM)" data-id="${id}"/>
+            <select class="rv-proj-select" data-id="${id}"><option value="">Selecione o projeto</option>${projOptions}</select>
+            <button class="rv-add btn primary" data-id="${id}">Lançar</button>
+            </div>
         </div>
-        <table class="tbl" style="margin-top:6px"><thead><tr><th>Data</th><th>Horas</th><th>Tipo</th><th>Projeto</th><th></th></tr></thead><tbody class="rv-hist" data-id="${id}">${(m.ledger||[]).map((e,i)=>`<tr><td>${e.date}</td><td>${fmtHHMM(e.minutos)}</td><td>${e.tipo}</td><td>${e.projeto||''}</td><td><button class="rv-del btn danger" data-id="${id}" data-index="${i}">Excluir</button></td></tr>`).join('')}</tbody></table>
-      `;
-      _frag.appendChild(card);
+
+        <div style="margin-top: 24px;">
+            <h4 style="margin: 16px 0 8px 0;">Histórico de Lançamentos</h4>
+            <table class="tbl rv-table-enhanced">
+            <thead><tr><th class="align-left">Data</th><th class="align-right">Horas</th><th>Projeto</th><th></th></tr></thead>
+            <tbody class="rv-hist" data-id="${id}">
+                ${(m.ledger||[]).slice().reverse().map((e,idx) => `
+                <tr>
+                    <td class="align-left">${formatDate(e.date)}</td>
+                    <td class="align-right">${fmtHHMM(e.minutos)}</td>
+                    <td class="align-left">${e.projeto||'--'}</td>
+                    <td class="actions-cell"><button class="rv-del btn-icon" title="Excluir Lançamento" data-id="${id}" data-index="${(m.ledger.length - 1) - idx}">${iconDelete}</button></td>
+                </tr>`).join('')}
+            </tbody>
+            </table>
+        </div>
+        `;
+        _frag.appendChild(card);
     });
+
     cont.appendChild(_frag);
-    cont.querySelectorAll('.rv-dia').forEach(el => el.onchange = e => { const id = e.target.dataset.id; state.externos[id].horasDiaMin = parseHHMM(e.target.value); save(); render(); renderAlerts(); });
-    cont.querySelectorAll('.rv-days input[type=checkbox]').forEach(cb => cb.onchange = e => { const pid = e.target.closest('.rv-days').dataset.id; const day = e.target.dataset.day; state.externos[pid].dias[day] = e.target.checked; save(); render(); });
-    cont.querySelectorAll('.rv-proj-contr').forEach(inp => inp.onchange = e => { const id = e.target.dataset.id; const proj = e.target.dataset.proj; const mins = parseHHMM(e.target.value); if (!state.externos[id].projetos[proj]) state.externos[id].projetos[proj] = { contratadoMin: 0 }; state.externos[id].projetos[proj].contratadoMin = mins; save(); render(); renderAlerts(); });
-    cont.querySelectorAll('.rv-proj-del').forEach(btn => btn.onclick = e => { const id = e.target.dataset.id; const proj = e.target.dataset.proj; if (confirm('Excluir projeto "' + proj + '"? Os lançamentos permanecerão.')) { delete state.externos[id].projetos[proj]; save(); render(); renderAlerts(); } });
-    cont.querySelectorAll('.rv-proj-add').forEach(btn => btn.onclick = e => { const id = e.target.dataset.id; const name = prompt('Nome do projeto:'); if (!name) return; const nameTrim = name.trim(); if (!nameTrim) return; if (!state.externos[id].projetos) state.externos[id].projetos = {}; if (state.externos[id].projetos[nameTrim]) { alert('Projeto já existente'); return; } let horas = prompt('Horas contratadas para ' + nameTrim + ' (HH:MM ou decimal):'); if (horas == null) return; horas = horas.trim(); const mins = parseHHMM(horas); if (mins <= 0) { alert('Horas inválidas'); return; } state.externos[id].projetos[nameTrim] = { contratadoMin: mins }; save(); render(); renderAlerts(); });
+    
+    cont.querySelectorAll('.rv-proj-container tbody tr').forEach(tr => {
+        tr.querySelector('td:first-child').style.cursor = 'pointer';
+        tr.querySelector('td:first-child').onclick = (e) => {
+            const target = e.currentTarget;
+            const id = target.closest('tr').querySelector('.rv-proj-contr').dataset.id;
+            const proj = target.closest('tr').dataset.proj;
+            const input = target.querySelector('.rv-proj-contr');
+            const currentHours = input.value;
+            
+            const newHours = prompt(`Editar horas contratadas para "${proj}":`, currentHours);
+            if (newHours !== null) {
+                const mins = parseHHMM(newHours);
+                if (!state.externos[id].projetos[proj]) state.externos[id].projetos[proj] = { contratadoMin: 0 };
+                state.externos[id].projetos[proj].contratadoMin = mins;
+                save(); render(); renderAlerts();
+            }
+        };
+    });
+
+    cont.querySelectorAll('.rv-proj-del').forEach(btn => btn.onclick = e => { e.stopPropagation(); const id = e.currentTarget.dataset.id; const proj = e.currentTarget.dataset.proj; if (confirm('Excluir projeto "' + proj + '"? Os lançamentos associados permanecerão.')) { delete state.externos[id].projetos[proj]; save(); render(); renderAlerts(); } });
+    cont.querySelectorAll('.rv-proj-add').forEach(btn => btn.onclick = e => { const id = e.target.dataset.id; const name = prompt('Nome do novo projeto:'); if (!name) return; const nameTrim = name.trim(); if (!nameTrim) return; if (!state.externos[id].projetos) state.externos[id].projetos = {}; if (state.externos[id].projetos[nameTrim]) { alert('Projeto já existente'); return; } let horas = prompt('Horas contratadas para ' + nameTrim + ' (HH:MM ou decimal):', '0'); if (horas == null) return; horas = horas.trim(); const mins = parseHHMM(horas); if (isNaN(mins)) { alert('Horas inválidas'); return; } state.externos[id].projetos[nameTrim] = { contratadoMin: mins }; save(); render(); renderAlerts(); });
+    
+    // ---> CÓDIGO RESTAURADO: Lógica para o botão "Lançar" <---
     cont.querySelectorAll('.rv-add').forEach(btn => btn.onclick = e => {
       const id = e.target.dataset.id;
-      const card = e.target.closest('.rv-card');
+      const card = e.target.closest('.panel');
       const startInp = card.querySelector('.rv-date-start[data-id="' + id + '"]');
       const endInp = card.querySelector('.rv-date-end[data-id="' + id + '"]');
       const recSel = card.querySelector('.rv-rec[data-id="' + id + '"]');
       const hoursInp = card.querySelector('.rv-hours[data-id="' + id + '"]');
-      const tipoSel = card.querySelector('.rv-tipo[data-id="' + id + '"]');
       const projSel = card.querySelector('.rv-proj-select[data-id="' + id + '"]');
       const startDateStr = startInp && startInp.value;
       const endDateStr = endInp && endInp.value;
       const rec = recSel ? recSel.value : 'once';
       const hoursStr = hoursInp ? hoursInp.value : '';
-      const tipo = tipoSel ? tipoSel.value : 'normal';
       const proj = projSel ? projSel.value : '';
       if (!startDateStr) { alert('Informe data de início'); return; }
-      if (!hoursStr) { alert('Informe horas'); return; }
+      if (!hoursStr) { alert('Informe as horas'); return; }
       const minutes = parseHHMM(hoursStr);
-      if (minutes <= 0) { alert('Horas inválidas'); return; }
+      if (minutes <= 0) { alert('Quantidade de horas inválida'); return; }
       if (!proj) { alert('Selecione o projeto'); return; }
       const startDate = fromYMD(startDateStr);
       const endDate = endDateStr ? fromYMD(endDateStr) : fromYMD(startDateStr);
       if (isNaN(startDate) || isNaN(endDate)) { alert('Data inválida'); return; }
-      if (endDate < startDate) { alert('Data final anterior à inicial'); return; }
+      if (endDate < startDate) { alert('Data final não pode ser anterior à data inicial'); return; }
       
       const diasCfg = (state.externos[id] && state.externos[id].dias) ? state.externos[id].dias : {};
       const dowMap = { 0:'dom', 1:'seg', 2:'ter', 3:'qua', 4:'qui', 5:'sex', 6:'sab' };
@@ -514,18 +579,28 @@
       const dates = Array.from(datesSet);
       const ledger = state.externos[id].ledger;
       dates.forEach(dateStr => {
-        const totalForDate = ledger.filter(e => e.date === dateStr).reduce((acc, e) => acc + (e.minutos || 0), 0);
-        const existing = ledger.find(e => e.date === dateStr && e.projeto === proj && e.tipo === tipo);
-        const proposedTotal = totalForDate + minutes;
-        if (proposedTotal > 24 * 60) { alert('O lançamento para ' + dateStr + ' excede o limite de 24 horas no dia.'); return; }
+        const existing = ledger.find(e => e.date === dateStr && e.projeto === proj);
         if (existing) { existing.minutos += minutes; } 
-        else { ledger.push({ date: dateStr, minutos: minutes, tipo: tipo, projeto: proj }); }
+        else { ledger.push({ date: dateStr, minutos: minutes, tipo: 'normal', projeto: proj }); }
       });
       save();
       render();
       renderAlerts();
     });
-    cont.querySelectorAll('.rv-del').forEach(btn => btn.onclick = e => { const id = e.target.dataset.id; const idx = +e.target.dataset.index; state.externos[id].ledger.splice(idx, 1); save(); render(); renderAlerts(); });
+
+    // ---> CÓDIGO RESTAURADO: Lógica para o botão "Excluir" do histórico <---
+    cont.querySelectorAll('.rv-del').forEach(btn => btn.onclick = e => { 
+        e.stopPropagation(); 
+        const id = e.currentTarget.dataset.id; 
+        const idx = +e.currentTarget.dataset.index; 
+        if(confirm('Tem certeza que deseja excluir este lançamento?')){ 
+            state.externos[id].ledger.splice(idx, 1); 
+            save(); 
+            render(); 
+            renderAlerts(); 
+        } 
+    });
+    
     renderAlerts();
     makeTableResponsive(cont);
   };
@@ -554,22 +629,10 @@
   };
 
   const observeResources = () => {
-    const rec = q('#tblRecursos tbody');
-    if (!rec) return;
+    const recContainer = q('#recursos-container');
+    if (!recContainer) return;
     const mo = new MutationObserver(() => { const p = q('#tab-horas-panel'); if (p && p.classList.contains('active')) render(); });
-    mo.observe(rec, {childList:true, subtree:true});
-  };
-
-  const ensureStyles = () => {
-    if (!q('#rv-enhancer-css')) {
-      const css = document.createElement('style'); css.id = 'rv-enhancer-css';
-      css.textContent = `.rv-card{border:1px solid #eee;border-radius:10px;padding:10px;margin:8px 0;background:#fff}
-.rv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;align-items:start}
-.rv-badge{display:inline-block;border:1px solid #ddd;border-radius:999px;padding:2px 6px;font-size:12px;background:#fafafa}
-.rv-entry{display:grid;grid-template-columns:120px 120px 120px 100px 100px 1fr 100px;gap:6px;align-items:center;margin-top:6px}
-`;
-      document.head.appendChild(css);
-    }
+    mo.observe(recContainer, {childList:true, subtree:true});
   };
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -577,7 +640,6 @@
     restoreFilterState();
     normalize();
     ensureUI();
-    ensureStyles();
     observeResources();
     makeTableResponsive(document);
     setTimeout(()=>{
