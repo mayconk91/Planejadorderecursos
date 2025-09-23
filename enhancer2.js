@@ -183,12 +183,10 @@
 
   function calcularPrevisaoFim(resourceId) {
     const recurso = state.externos[resourceId];
-    if (!recurso || !recurso.ledger || recurso.ledger.length === 0) {
-      return null;
-    }
+    if (!recurso) return null;
 
     const totalContratadoMin = Object.values(recurso.projetos || {}).reduce((sum, p) => sum + (p.contratadoMin || 0), 0);
-    const totalUtilizadoMin = recurso.ledger.reduce((sum, entry) => sum + (entry.minutos || 0), 0);
+    const totalUtilizadoMin = (recurso.ledger || []).reduce((sum, entry) => sum + (entry.minutos || 0), 0);
     const saldoMin = totalContratadoMin - totalUtilizadoMin;
 
     if (saldoMin <= 0) {
@@ -200,15 +198,22 @@
       return "Horas/dia não definidas";
     }
 
-    const sortedLedger = [...recurso.ledger].sort((a, b) => new Date(a.date) - new Date(b.date));
-    const ultimaDataLancada = fromYMD(sortedLedger[sortedLedger.length - 1].date);
-    
+    // Se não houver lançamentos, calcula a partir de hoje
+    const dataDePartida = recurso.ledger && recurso.ledger.length > 0
+        ? fromYMD([...recurso.ledger].sort((a, b) => new Date(b.date) - new Date(a.date))[0].date)
+        : new Date();
+
     let diasUteisNecessarios = Math.ceil(saldoMin / horasDiaMin);
-    let dataCorrente = new Date(ultimaDataLancada);
+    let dataCorrente = new Date(dataDePartida);
     
-    const diasTrabalho = recurso.dias || {};
+    const diasTrabalho = recurso.dias || {seg:true,ter:true,qua:true,qui:true,sex:true,sab:false,dom:false};
     const dowMap = { 0:'dom', 1:'seg', 2:'ter', 3:'qua', 4:'qui', 5:'sex', 6:'sab' };
     const feriadosSet = new Set((state.feriados || []).map(f => f.date));
+
+    // Desconta o dia de partida se ele for um dia de trabalho e já tiver lançamento
+    if (recurso.ledger && recurso.ledger.length > 0) {
+        // não faz nada, o loop começa do dia seguinte
+    }
 
     while (diasUteisNecessarios > 0) {
       dataCorrente.setDate(dataCorrente.getDate() + 1);
@@ -462,7 +467,12 @@
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
             <div>
                 <h3 style="margin: 0 0 8px 0;">${iconUser} ${r.nome}</h3>
-                <div><span class="badge-status ${status.class}">${status.text}</span></div>
+                <div style="margin-bottom: 8px;"><span class="badge-status ${status.class}">${status.text}</span></div>
+
+                <div class="muted small">
+                    <label for="rv-dia-${id}" style="font-weight: 500;">Horas/dia (para previsão):</label>
+                    <input id="rv-dia-${id}" class="rv-dia userbox" type="text" data-id="${id}" value="${fmtHHMM(m.horasDiaMin)}" style="width: 80px; padding: 4px 8px; margin-top: 4px;"/>
+                </div>
             </div>
             <div style="text-align: right;">
                 <div class="muted small">${iconCalendar} Previsão de Fim</div>
@@ -514,6 +524,16 @@
 
     cont.appendChild(_frag);
     
+    cont.querySelectorAll('.rv-dia').forEach(el => {
+        el.onchange = e => {
+            const id = e.target.dataset.id;
+            state.externos[id].horasDiaMin = parseHHMM(e.target.value);
+            save();
+            render();
+            renderAlerts();
+        };
+    });
+
     cont.querySelectorAll('.rv-proj-container tbody tr').forEach(tr => {
         tr.querySelector('td:first-child').style.cursor = 'pointer';
         tr.querySelector('td:first-child').onclick = (e) => {
