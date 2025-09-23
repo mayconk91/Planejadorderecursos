@@ -15,138 +15,104 @@
           Cadastro de recursos e atividades, timeline por recurso, filtros combinados, busca, indicadores de capacidade por dia e exportações (Excel/CSV) para Power BI. Histórico de alterações com justificativa.
         </p>
       </div>
-      
     </header>
 
-  <nav class="tabs">
-    <button class="tab active" data-tab="plan">Planejamento</button>
-    <button class="tab" data-tab="exec">Visão Executiva</button>
-    <button class="tab" data-tab="avail">Disponibilidade</button>
-    <button class="tab" data-tab="cap">Capacidade</button>
-    <button class="tab" data-tab="util">Exportações & Backup</button>
-  </nav>
+    <nav class="tabs">
+      <button class="tab active" data-tab="plan">Planejamento</button>
+      <button class="tab" data-tab="exec">Visão Executiva</button>
+      <button class="tab" data-tab="avail">Disponibilidade</button>
+      <button class="tab" data-tab="cap">Capacidade</button>
+      <button class="tab" data-tab="util">Exportações & Backup</button>
+    </nav>
 
-  <div id="tab-plan" class="tabpanel active">
+    <div id="tab-plan" class="tabpanel active">
+      <section class="panel filters">
+        <div class="group">
+          <label>Status</label>
+          <div class="chipset" id="statusChips"></div>
+        </div>
+        <div class="group">
+          <label>Tipo</label>
+          <select id="tipoSel">
+            <option value="">Todos</option>
+            <option>Interno</option>
+            <option>Externo</option>
+          </select>
+        </div>
+        <div class="group">
+          <label>Senioridade</label>
+          <select id="senioridadeSel">
+            <option value="">Todas</option>
+            <option>Jr</option>
+            <option>Pl</option>
+            <option>Sr</option>
+            <option>NA</option>
+          </select>
+        </div>
+        <div class="group grow">
+          <label>Busca por título</label>
+          <input id="buscaTitulo" placeholder="Digite parte do título da atividade" />
+        </div>
+        <div class="group">
+          <label>Busca por tag</label>
+          <input id="buscaTag" placeholder="Digite uma tag para filtrar" />
+        </div>
+        <div class="group">
+          <label>Recurso</label>
+          <input id="buscaRecurso" placeholder="Digite parte do nome do recurso" />
+        </div>
+        <div class="group">
+          <label>Início (visão)</label>
+          <input id="inicioVisao" type="date" />
+        </div>
+        <div class="group">
+          <label>Fim (visão)</label>
+          <input id="fimVisao" type="date" />
+        </div>
+      </section>
 
+      <section class="panel">
+        <div class="toolbar">
+          <button id="btnNovoRecurso" class="btn primary">+ Recurso</button>
+          <button id="btnNovaAtividade" class="btn">+ Atividade</button>
+        </div>
+        <div class="legend">
+          <strong>Legenda:</strong>
+          <span class="badge planned">Planejada</span>
+          <span class="badge running">Em Execução</span>
+          <span class="badge blocked">Bloqueada</span>
+          <span class="badge done">Concluída</span>
+          <span class="badge canceled">Cancelada</span>
+          <span class="badge gap">Lacuna</span>
+          <span class="badge heat">Heatmap capacidade (0–100% / >100%)</span>
+        </div>
+        <div id="gantt" class="gantt"></div>
+      </section>
 
-    <section class="panel filters">
-      <div class="group">
-        <label>Status</label>
-        <div class="chipset" id="statusChips"></div>
-      </div>
-      <div class="group">
-        <label>Tipo</label>
-        <select id="tipoSel">
-          <option value="">Todos</option>
-          <option>Interno</option>
-          <option>Externo</option>
-        </select>
-      </div>
-      <div class="group">
-        <label>Senioridade</label>
-        <select id="senioridadeSel">
-          <option value="">Todas</option>
-          <option>Jr</option>
-          <option>Pl</option>
-          <option>Sr</option>
-          <option>NA</option>
-        </select>
-      </div>
-      <div class="group grow">
-        <label>Busca por título</label>
-        <input id="buscaTitulo" placeholder="Digite parte do título da atividade" />
-      </div>
-      <div class="group">
-        <label>Busca por tag</label>
-        <input id="buscaTag" placeholder="Digite uma tag para filtrar" />
-      </div>
-      <div class="group">
-        <label>Recurso</label>
-        <input id="buscaRecurso" placeholder="Digite parte do nome do recurso" />
-      </div>
-      <div class="group">
-        <label>Início (visão)</label>
-        <input id="inicioVisao" type="date" />
-      </div>
-      <div class="group">
-        <label>Fim (visão)</label>
-        <input id="fimVisao" type="date" />
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="toolbar">
-        <button id="btnNovoRecurso" class="btn primary">+ Recurso</button>
-        <button id="btnNovaAtividade" class="btn">+ Atividade</button>
-      </div>
-
-      <div class="legend">
-        <strong>Legenda:</strong>
-        <span class="badge planned">Planejada</span>
-        <span class="badge running">Em Execução</span>
-        <span class="badge blocked">Bloqueada</span>
-        <span class="badge done">Concluída</span>
-        <span class="badge canceled">Cancelada</span>
-        <span class="badge gap">Lacuna</span>
-        <span class="badge heat">Heatmap capacidade (0–100% / &gt;100%)</span>
-      </div>
-
-      <div id="gantt" class="gantt"></div>
-    </section>
-
-    <section class="panel grid">
-      <div>
-        <h2>Recursos</h2>
-        <table id="tblRecursos" class="tbl">
-          <thead>
-            <tr>
-              <th>Nome</th>
-              <th>Tipo</th>
-              <th>Senioridade</th>
-              <th>Ativo</th>
-              <th>Capacidade % (dia)</th>
-              <th>Início ativo</th>
-              <th>Fim ativo</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <div>
-        <h2>Atividades</h2>
-        <table id="tblAtividades" class="tbl">
-          <thead>
-            <tr>
-              <th>Título</th>
-              <th>Recurso</th>
-              <th>Início</th>
-              <th>Fim</th>
-              <th>Status</th>
-              <th>Alocação %</th>
-              <th>Tags</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel" id="aggPanel">
-      <div class="toolbar">
-        <strong>Capacidade agregada</strong>
-        <label class="muted" style="margin-left:8px">Granularidade:</label>
-        <select id="aggGran">
-          <option value="weekly">Semanal</option>
-          <option value="monthly">Mensal</option>
-        </select>
-      </div>
-      <div id="aggCharts" class="agg-grid"></div>
-    </section>
-
+      <section class="grid-cards-layout">
+        <div class="column-recursos">
+          <h2>Recursos</h2>
+          <div id="recursos-container">
+            </div>
+        </div>
+        <div class="column-atividades">
+          <h2>Atividades</h2>
+          <div id="atividades-container" class="grid-cards">
+            </div>
+        </div>
+      </section>
+      <section class="panel" id="aggPanel">
+        <div class="toolbar">
+          <strong>Capacidade agregada</strong>
+          <label class="muted" style="margin-left:8px">Granularidade:</label>
+          <select id="aggGran">
+            <option value="weekly">Semanal</option>
+            <option value="monthly">Mensal</option>
+          </select>
+        </div>
+        <div id="aggCharts" class="agg-grid"></div>
+      </section>
     </div>
-
 
     <div id="tab-exec" class="tabpanel">
       <section class="panel kpi" id="kpiPanel">
@@ -161,7 +127,7 @@
         <div class="toolbar"><strong>Recursos Sobrecarregados — Detalhes</strong></div>
         <div class="muted" id="overloadEmptyMsg">Nenhum recurso sobrecarregado no período.</div>
         <div class="table-wrap" style="display:none" id="overloadDetailsWrap">
-          <table class="table" id="overloadDetails">
+          <table class="tbl" id="overloadDetails">
             <thead>
               <tr>
                 <th>Recurso</th>
@@ -174,8 +140,6 @@
         </div>
       </section>
     </div>
-
-
     
     <div id="tab-avail" class="tabpanel">
       <section class="panel">
@@ -234,8 +198,7 @@
       </section>
     </div>
 
-
-  <div id="tab-util" class="tabpanel">
+    <div id="tab-util" class="tabpanel">
       <section class="panel">
         <h2>Exportações & Backup</h2>
         <div class="actions stack">
@@ -256,10 +219,9 @@
         <button id="btnBackup" class="btn">Backup (JSON)</button>
         <button id="btnExportPDF" class="btn primary">Exportar PDF (Visão Geral)</button>
         </div>
-<p class="muted">Dica: para alimentar por planilha, use "Selecionar BD (ler/gravar)" e o "Modelo de BD (Excel/CSV)". Se você usar "Importar BD (somente leitura)", as alterações não serão salvas no arquivo.</p>
+        <p class="muted">Dica: para alimentar por planilha, use "Selecionar BD (ler/gravar)" e o "Modelo de BD (Excel/CSV)". Se você usar "Importar BD (somente leitura)", as alterações não serão salvas no arquivo.</p>
       </section>
     </div>
-
   </div>
 
   <dialog id="dlgRecurso">
@@ -283,15 +245,15 @@
           </select>
         </label>
       </div>
-<div class="grid2">
+      <div class="grid2">
         <label>Ativo <input type="checkbox" name="ativo" checked /></label>
         <label>Capacidade diária (%) <input type="number" name="capacidade" min="1" max="1000" value="100" /></label>
       </div>
-<div class="grid2">
+      <div class="grid2">
         <label>Início ativo (opcional) <input type="date" name="inicioAtivo" /></label>
         <label>Fim ativo (opcional) <input type="date" name="fimAtivo" /></label>
       </div>
-<menu>
+      <menu>
         <button value="cancel">Cancelar</button>
         <button id="btnSalvarRecurso" value="save" class="primary">Salvar</button>
       </menu>
@@ -375,5 +337,5 @@
       <a href="https://www.linkedin.com/in/maycon-douglas-327537146" target="_blank" rel="noopener noreferrer">Conecte-se comigo no LinkedIn</a>
     </p>
   </footer>
-  </body>
+</body>
 </html>

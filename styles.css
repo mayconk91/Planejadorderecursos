@@ -181,3 +181,192 @@ dialog{border:none;border-radius:14px;max-width:520px;width:92%;padding:0}
     border-color: #a5b4fc;
     color: #3730a3;
 }
+/* ===== MELHORIAS VISUAIS (LAYOUT DE CARDS) ===== */
+
+/* 1. Estrutura de Colunas e Grade */
+.grid-cards-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr; /* Coluna de recursos fixa, atividades flexível */
+  gap: 16px;
+  align-items: start;
+}
+
+.column-recursos h2, .column-atividades h2 {
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  color: #1e293b;
+}
+
+.column-recursos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); /* Grade responsiva */
+  gap: 12px;
+}
+
+/* 2. Seções Colapsáveis para Recursos */
+.resource-group {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 8px;
+}
+.resource-group summary {
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px;
+  color: #334155;
+}
+.resource-group[open] {
+  background: #f8fafc;
+}
+.resource-group[open] summary {
+  margin-bottom: 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+/* 3. Estilo Base dos Cards */
+.resource-card, .activity-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.resource-card:hover, .activity-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.06);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.card-header strong {
+  font-size: 14px;
+  color: #0f172a;
+}
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.card-footer {
+  margin-top: auto; /* Alinha no final do card */
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}
+
+/* 4. Ações e Botões de Ícone */
+.card-actions {
+  display: flex;
+  gap: 4px;
+}
+.btn-icon {
+  width: 24px;
+  height: 24px;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0.6;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 16px;
+  transition: opacity 0.2s, background-color 0.2s;
+  border-radius: 4px;
+}
+.btn-icon:hover {
+  opacity: 1;
+  background-color: #f1f5f9;
+}
+.btn-icon.edit { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23475569"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828zM5 12V7a1 1 0 011-1h2.586l-2 2H6v2.586l-2 2V12zM3 15a2 2 0 002 2h10a2 2 0 002-2v-2.586l-2-2V15H5v-2.586l-2-2V15z"/></svg>'); }
+.btn-icon.duplicate { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23475569"><path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a1 1 0 011-1h14a1 1 0 110 2H3a1 1 0 01-1-1z"/></svg>'); }
+.btn-icon.history { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23475569"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clip-rule="evenodd"/></svg>'); }
+.btn-icon.delete { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23ef4444"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>'); }
+
+/* 5. Hierarquia Visual (Chips, Badges, Barras) */
+.chip {
+  display: inline-block;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+.chip.tag {
+  background-color: #e0e7ff;
+  border-color: #a5b4fc;
+  color: #3730a3;
+}
+.tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.status-badge {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: #fff;
+}
+.status-badge.status-planejada { background-color: #f59e0b; } /* Amarelo */
+.status-badge.status-em-execução { background-color: #16a34a; } /* Verde */
+.status-badge.status-bloqueada { background-color: #dc2626; } /* Vermelho */
+.status-badge.status-concluída { background-color: #6b7280; } /* Cinza */
+.status-badge.status-cancelada { background-color: #9ca3af; } /* Cinza claro */
+
+.activity-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.allocation-bar-container {
+  width: 100%;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.allocation-bar {
+  height: 100%;
+  background: #3b82f6; /* Azul */
+  border-radius: 4px;
+}
+.allocation-overload {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  right: -10px; /* Extrapola para indicar sobrecarga */
+  height: 100%;
+  background: #ef4444; /* Vermelho */
+}
+
+/* 6. Cores Temáticas */
+.resource-card.type-interno { border-left: 4px solid #3b82f6; } /* Azul */
+.resource-card.type-externo { border-left: 4px solid #8b5cf6; } /* Roxo */
+
+/* 7. Responsividade */
+@media (max-width: 800px) {
+  .grid-cards-layout {
+    grid-template-columns: 1fr; /* Colunas empilhadas */
+  }
+}
+
+/* Esconde as tabelas antigas se ainda existirem */
+#tblRecursos, #tblAtividades {
+    display: none;
+}

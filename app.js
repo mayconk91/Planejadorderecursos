@@ -378,8 +378,10 @@ const buscaRecursoInput=document.getElementById("buscaRecurso");
 const inicioVisao=document.getElementById("inicioVisao");
 const fimVisao=document.getElementById("fimVisao");
 
-const tblRecursos=document.querySelector("#tblRecursos tbody");
-const tblAtividades=document.querySelector("#tblAtividades tbody");
+// As referências às tabelas são mantidas para compatibilidade com outros scripts (enhancer.js)
+// mas a função renderTables agora usa os contêineres de cards.
+const tblRecursos=document.querySelector("#recursos-container"); // Anteriormente '#tblRecursos tbody'
+const tblAtividades=document.querySelector("#atividades-container"); // Anteriormente '#tblAtividades tbody'
 const gantt=document.getElementById("gantt");
 
 const dlgRecurso=document.getElementById("dlgRecurso");
@@ -592,67 +594,129 @@ btnJustConfirm.onclick=(e)=>{
   saveBDDebounced();
 };
 
-// ===== Tabelas =====
+// ===== NOVA FUNÇÃO renderTables PARA LAYOUT DE CARDS =====
 function renderTables(filteredActs){
-  // Recursos
-  tblRecursos.innerHTML="";
-  resources.forEach(r=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${r.nome}</td>
-      <td>${r.tipo}</td>
-      <td>${r.senioridade}</td>
-      <td>${r.ativo?"Sim":"Não"}</td>
-      <td>${r.capacidade}</td>
-      <td>${r.inicioAtivo||""}</td>
-      <td>${r.fimAtivo||""}</td>
-      <td class="actions">
-        <button class="btn">Editar</button>
-        <button class="btn danger">Excluir</button>
-      </td>`;
-    tr.querySelectorAll("button")[0].onclick=()=>{
-      dlgRecursoTitulo.textContent="Editar Recurso";
-      formRecurso.elements["id"].value=r.id;
-      formRecurso.elements["nome"].value=r.nome;
-      formRecurso.elements["tipo"].value=r.tipo;
-      formRecurso.elements["senioridade"].value=r.senioridade;
-      formRecurso.elements["ativo"].checked=!!r.ativo;
-      formRecurso.elements["capacidade"].value=r.capacidade||100;
-      formRecurso.elements["inicioAtivo"].value=r.inicioAtivo||"";
-      formRecurso.elements["fimAtivo"].value=r.fimAtivo||"";
-      dlgRecurso.showModal();
-    };
-    tr.querySelectorAll("button")[1].onclick=()=>{
-      if(!confirm("Remover recurso e suas alocações?")) return;
-      resources=resources.filter(x=>x.id!==r.id);
-      activities=activities.filter(a=>a.resourceId!==r.id);
-      saveLS(LS.res,resources); saveLS(LS.act,activities);
-      renderAll();
-      saveBDDebounced();
-    };
-    tblRecursos.appendChild(tr);
+  const recursosContainer = document.getElementById('recursos-container');
+  const atividadesContainer = document.getElementById('atividades-container');
+  if (!recursosContainer || !atividadesContainer) return;
+
+  // ===== Renderização dos Cards de Recursos =====
+  recursosContainer.innerHTML = "";
+  const groupedResources = resources.reduce((acc, r) => {
+    const tipo = r.tipo || 'Outros';
+    if (!acc[tipo]) acc[tipo] = [];
+    acc[tipo].push(r);
+    return acc;
+  }, {});
+
+  // Ordem desejada: Interno, Externo, e depois outros
+  const groupOrder = ['Interno', 'Externo'];
+  const sortedGroups = [...Object.keys(groupedResources)].sort((a, b) => {
+    const aIndex = groupOrder.indexOf(a);
+    const bIndex = groupOrder.indexOf(b);
+    if (aIndex > -1 && bIndex > -1) return aIndex - bIndex;
+    if (aIndex > -1) return -1;
+    if (bIndex > -1) return 1;
+    return a.localeCompare(b);
   });
 
-  // Atividades
-  tblAtividades.innerHTML="";
-  filteredActs.forEach(a=>{
-    const r=resources.find(x=>x.id===a.resourceId);
-    const tr=document.createElement("tr");
-    const tagsHtml = (a.tags || []).map(t => `<span class="badge tag">${t}</span>`).join(' ');
-    tr.innerHTML=`
-      <td>${a.titulo}</td>
-      <td>${r? r.nome:"—"}</td>
-      <td>${a.inicio}</td>
-      <td>${a.fim}</td>
-      <td>${a.status}</td>
-      <td>${a.alocacao||100}</td>
-      <td>${tagsHtml}</td>
-      <td class="actions">
-        <button class="btn">Editar</button>
-        <button class="btn">Histórico</button>
-        <button class="btn danger">Excluir</button>
-      </td>`;
-    tr.querySelectorAll("button")[0].onclick=()=>{
+  for (const tipo of sortedGroups) {
+    const group = groupedResources[tipo];
+    const details = document.createElement('details');
+    details.className = 'resource-group';
+    details.open = true; // Inicia aberto
+
+    const summary = document.createElement('summary');
+    summary.textContent = tipo + ` (${group.length})`;
+    details.appendChild(summary);
+
+    group.forEach(r => {
+      const card = document.createElement('div');
+      card.className = `resource-card type-${tipo.toLowerCase()}`;
+      card.innerHTML = `
+        <div class="card-header">
+          <strong class="resource-name">👤 ${r.nome}</strong>
+          <div class="card-actions">
+            <button class="btn-icon edit" title="Editar"></button>
+            <button class="btn-icon duplicate" title="Duplicar"></button>
+            <button class="btn-icon delete" title="Excluir"></button>
+          </div>
+        </div>
+        <div class="card-body">
+          <span class="chip">${r.senioridade}</span>
+          <span class="chip">${r.ativo ? "Ativo" : "Inativo"}</span>
+          <span class="chip">📊 Cap: ${r.capacidade || 100}%</span>
+        </div>
+        ${(r.inicioAtivo || r.fimAtivo) ? `<div class="card-footer muted small">📅 ${r.inicioAtivo || '...'} → ${r.fimAtivo || '...'}</div>` : ''}
+      `;
+      // Adiciona eventos aos botões de ação
+      card.querySelector('.edit').onclick = () => {
+        dlgRecursoTitulo.textContent="Editar Recurso";
+        formRecurso.elements["id"].value=r.id;
+        formRecurso.elements["nome"].value=r.nome;
+        formRecurso.elements["tipo"].value=r.tipo;
+        formRecurso.elements["senioridade"].value=r.senioridade;
+        formRecurso.elements["ativo"].checked=!!r.ativo;
+        formRecurso.elements["capacidade"].value=r.capacidade||100;
+        formRecurso.elements["inicioAtivo"].value=r.inicioAtivo||"";
+        formRecurso.elements["fimAtivo"].value=r.fimAtivo||"";
+        dlgRecurso.showModal();
+      };
+      card.querySelector('.duplicate').onclick = () => {
+        const copy={...r,id:uuid(),nome:"Cópia de "+r.nome};
+        resources.push(copy); saveLS(LS.res,resources); renderAll();
+      };
+      card.querySelector('.delete').onclick = () => {
+        if(!confirm("Remover recurso e suas alocações?")) return;
+        resources=resources.filter(x=>x.id!==r.id);
+        activities=activities.filter(a=>a.resourceId!==r.id);
+        saveLS(LS.res,resources); saveLS(LS.act,activities);
+        renderAll();
+      };
+      details.appendChild(card);
+    });
+    recursosContainer.appendChild(details);
+  }
+
+  // ===== Renderização dos Cards de Atividades =====
+  atividadesContainer.innerHTML = "";
+  filteredActs.forEach(a => {
+    const r = resources.find(x => x.id === a.resourceId);
+    const card = document.createElement('div');
+    card.className = 'activity-card';
+    const statusClass = (a.status || '').toLowerCase().replace(/\s+/g, '-');
+
+    const tagsHtml = (a.tags && a.tags.length)
+      ? `<div class="tags-container">${a.tags.map(t => `<span class="chip tag">${t}</span>`).join(' ')}</div>`
+      : '';
+
+    card.innerHTML = `
+      <div class="card-header">
+        <strong class="activity-title">${a.titulo}</strong>
+        <div class="card-actions">
+          <button class="btn-icon edit" title="Editar"></button>
+          <button class="btn-icon history" title="Histórico"></button>
+          <button class="btn-icon duplicate" title="Duplicar"></button>
+          <button class="btn-icon delete" title="Excluir"></button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="activity-meta">
+          <span class="status-badge status-${statusClass}">${a.status}</span>
+          <span class="muted small">👤 ${r ? r.nome : 'N/A'}</span>
+        </div>
+        <div class="allocation-bar-container" title="Alocação: ${a.alocacao || 100}%">
+          <div class="allocation-bar" style="width: ${Math.min(a.alocacao || 100, 100)}%;"></div>
+          ${(a.alocacao || 100) > 100 ? '<div class="allocation-overload"></div>' : ''}
+        </div>
+        ${tagsHtml}
+      </div>
+      <div class="card-footer muted small">
+        📅 ${a.inicio} → ${a.fim}
+      </div>
+    `;
+    // Adiciona eventos aos botões de ação
+    card.querySelector('.edit').onclick = () => {
       dlgAtividadeTitulo.textContent="Editar Atividade";
       fillRecursoOptions();
       formAtividade.elements["id"].value=a.id;
@@ -665,7 +729,7 @@ function renderTables(filteredActs){
       formAtividade.elements["tags"].value = (a.tags || []).join(', ');
       dlgAtividade.showModal();
     };
-    tr.querySelectorAll("button")[1].onclick=()=>{
+    card.querySelector('.history').onclick = () => {
       histCurrentId=a.id;
       const list = trails[a.id]||[];
       if(list.length===0){
@@ -686,16 +750,19 @@ function renderTables(filteredActs){
         histList.innerHTML=rows || '<div class="muted">Sem registros no período.</div>';
       }
       dlgHist.showModal();
-      const btn=document.getElementById('histApply'); if(btn){ btn.onclick=()=>{ tr.querySelectorAll('button')[1].onclick(); }; }
+      const btn=document.getElementById('histApply'); if(btn){ btn.onclick=()=>{ card.querySelector('.history').onclick(); }; }
     };
-    tr.querySelectorAll("button")[2].onclick=()=>{
+    card.querySelector('.duplicate').onclick = () => {
+      const copy={...a,id:uuid(),titulo:"Cópia de "+a.titulo};
+      activities.push(copy); saveLS(LS.act,activities); renderAll();
+    };
+    card.querySelector('.delete').onclick = () => {
       if(!confirm("Remover atividade?")) return;
       activities=activities.filter(x=>x.id!==a.id);
       saveLS(LS.act,activities);
       renderAll();
-      saveBDDebounced();
     };
-    tblAtividades.appendChild(tr);
+    atividadesContainer.appendChild(card);
   });
 }
 
@@ -1423,126 +1490,6 @@ function renderKPIs(){
       try{ w.document.close(); w.focus(); w.print(); }catch(e){}
     }
   };
-})();
-
-// ===== renderTables (sobrescrito para incluir 'Duplicar') =====
-(function(){
-    const originalRenderTables = renderTables;
-    renderTables = function(filteredActs) {
-        // Recursos
-        tblRecursos.innerHTML="";
-        resources.forEach(r=>{
-            const tr=document.createElement("tr");
-            tr.innerHTML=`
-              <td>${r.nome}</td>
-              <td>${r.tipo}</td>
-              <td>${r.senioridade}</td>
-              <td>${r.ativo?"Sim":"Não"}</td>
-              <td>${r.capacidade}</td>
-              <td>${r.inicioAtivo||""}</td>
-              <td>${r.fimAtivo||""}</td>
-              <td class="actions">
-                <button class="btn">Editar</button>
-                <button class="btn dup">Duplicar</button>
-                <button class="btn danger">Excluir</button>
-              </td>`;
-            const [btnEdit, btnDup, btnDel] = tr.querySelectorAll("button");
-            btnEdit.onclick=()=>{
-              dlgRecursoTitulo.textContent="Editar Recurso";
-              formRecurso.elements["id"].value=r.id;
-              formRecurso.elements["nome"].value=r.nome;
-              formRecurso.elements["tipo"].value=r.tipo;
-              formRecurso.elements["senioridade"].value=r.senioridade;
-              formRecurso.elements["ativo"].checked=!!r.ativo;
-              formRecurso.elements["capacidade"].value=r.capacidade||100;
-              formRecurso.elements["inicioAtivo"].value=r.inicioAtivo||"";
-              formRecurso.elements["fimAtivo"].value=r.fimAtivo||"";
-              dlgRecurso.showModal();
-            };
-            btnDup.onclick=()=>{
-              const copy={...r,id:uuid(),nome:"Cópia de "+r.nome};
-              resources.push(copy); saveLS(LS.res,resources); renderAll();
-            };
-            btnDel.onclick=()=>{
-              if(!confirm("Remover recurso e suas alocações?")) return;
-              resources=resources.filter(x=>x.id!==r.id);
-              activities=activities.filter(a=>a.resourceId!==r.id);
-              saveLS(LS.res,resources); saveLS(LS.act,activities);
-              renderAll();
-            };
-            tblRecursos.appendChild(tr);
-        });
-
-        // Atividades
-        tblAtividades.innerHTML="";
-        filteredActs.forEach(a=>{
-            const r=resources.find(x=>x.id===a.resourceId);
-            const tr=document.createElement("tr");
-            const tagsHtml = (a.tags || []).map(t => `<span class="badge tag">${t}</span>`).join(' ');
-            tr.innerHTML=`
-              <td>${a.titulo}</td>
-              <td>${r? r.nome:"—"}</td>
-              <td>${a.inicio}</td>
-              <td>${a.fim}</td>
-              <td>${a.status}</td>
-              <td>${a.alocacao||100}</td>
-              <td>${tagsHtml}</td>
-              <td class="actions">
-                <button class="btn">Editar</button>
-                <button class="btn">Histórico</button>
-                <button class="btn dup">Duplicar</button>
-                <button class="btn danger">Excluir</button>
-              </td>`;
-            const [btnEdit, btnHist, btnDup, btnDel] = tr.querySelectorAll("button");
-            btnEdit.onclick=()=>{
-              dlgAtividadeTitulo.textContent="Editar Atividade";
-              fillRecursoOptions();
-              formAtividade.elements["id"].value=a.id;
-              formAtividade.elements["titulo"].value=a.titulo;
-              formAtividade.elements["resourceId"].value=a.resourceId;
-              formAtividade.elements["inicio"].value=a.inicio;
-              formAtividade.elements["fim"].value=a.fim;
-              formAtividade.elements["status"].value=a.status;
-              formAtividade.elements["alocacao"].value=a.alocacao||100;
-              formAtividade.elements["tags"].value = (a.tags || []).join(', ');
-              dlgAtividade.showModal();
-            };
-            btnHist.onclick=()=>{
-              histCurrentId=a.id;
-              const list = trails[a.id]||[];
-              if(list.length===0){
-                histList.innerHTML='<div class="muted">Sem alterações de datas registradas para esta atividade.</div>';
-              }else{
-                const s=document.getElementById('histStart').value;
-                const e=document.getElementById('histEnd').value;
-                const rows=list.slice().reverse().filter(it=>{
-                  const t=new Date(it.ts);
-                  return (!s || t>=fromYMD(s)) && (!e || t<=addDays(fromYMD(e),0));
-                }).map(it=>{
-                  return `<div style="padding:6px 8px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; margin:6px 0">
-                      <div style="font-size:12px;color:#475569">${new Date(it.ts).toLocaleString()}${it.user? ' • ' + it.user : ''}</div>
-                      <div style="font-weight:600">Início: ${it.oldInicio} → ${it.newInicio} | Fim: ${it.oldFim} → ${it.newFim}</div>
-                      <div style="margin-top:4px">${it.justificativa? it.justificativa.replace(/</g,'&lt;') : ''}</div>
-                    </div>`;
-                }).join("");
-                histList.innerHTML=rows || '<div class="muted">Sem registros no período.</div>';
-              }
-              dlgHist.showModal();
-              const btn=document.getElementById('histApply'); if(btn){ btn.onclick=()=>{ btnHist.onclick(); }; }
-            };
-            btnDup.onclick=()=>{
-              const copy={...a,id:uuid(),titulo:"Cópia de "+a.titulo};
-              activities.push(copy); saveLS(LS.act,activities); renderAll();
-            };
-            btnDel.onclick=()=>{
-              if(!confirm("Remover atividade?")) return;
-              activities=activities.filter(x=>x.id!==a.id);
-              saveLS(LS.act,activities);
-              renderAll();
-            };
-            tblAtividades.appendChild(tr);
-        });
-    }
 })();
 
 // ===== Hook no renderAll para atualizar KPIs e Tags sem quebrar fluxo =====
