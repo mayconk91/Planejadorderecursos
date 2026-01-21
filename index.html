@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Planejador de Recursos — Offline</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="theme-color" content="#2563eb" />
+  <link rel="icon" href="./icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+</head>
+<body>
+  <div class="container">
+    <header class="topbar">
+      <div>
+        <h1>Planejador de Recursos — Offline</h1>
+        <p class="muted">
+          Cadastro de recursos e atividades, timeline por recurso, filtros combinados, busca, indicadores de capacidade por dia e exportações (Excel/CSV) para Power BI. Histórico de alterações com justificativa.
+        </p>
+      <!-- Indicador de status de sincronização do banco de dados -->
+    </div>
+    <!-- Banner de status do banco de dados: colocado como segundo item flex para aparecer à direita -->
+    <div id="dbStatusBanner" class="db-status-banner warning">Banco de Dados: Não sincronizado</div>
+  </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="plan">Planejamento</button>
+      <button class="tab" data-tab="exec">Visão Executiva</button>
+      <button class="tab" data-tab="avail">Disponibilidade</button>
+      <button class="tab" data-tab="cap">Capacidade</button>
+      <button class="tab" data-tab="util">Exportações & Backup</button>
+    </nav>
+
+    <div id="tab-plan" class="tabpanel active">
+      <section class="panel filters">
+        <div class="group">
+          <label>Status</label>
+          <div class="chipset" id="statusChips"></div>
+        </div>
+        <div class="group">
+          <label>Tipo</label>
+          <select id="tipoSel">
+            <option value="">Todos</option>
+            <option>Interno</option>
+            <option>Externo</option>
+          </select>
+        </div>
+        <div class="group">
+          <label>Senioridade</label>
+          <select id="senioridadeSel">
+            <option value="">Todas</option>
+            <option>Jr</option>
+            <option>Pl</option>
+            <option>Sr</option>
+            <option>NA</option>
+          </select>
+        </div>
+        <div class="group grow">
+          <label>Busca por título</label>
+          <input id="buscaTitulo" placeholder="Digite parte do título da atividade" />
+        </div>
+        <div class="group">
+          <label>Busca por tag</label>
+          <input id="buscaTag" placeholder="Digite uma tag para filtrar" />
+        </div>
+        <div class="group">
+          <label>Recurso</label>
+          <input id="buscaRecurso" placeholder="Digite parte do nome do recurso" />
+        </div>
+        <div class="group">
+          <label>Início (visão)</label>
+          <input id="inicioVisao" type="date" />
+        </div>
+        <div class="group">
+          <label>Fim (visão)</label>
+          <input id="fimVisao" type="date" />
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="toolbar">
+          <button id="btnNovoRecurso" class="btn primary">+ Recurso</button>
+          <button id="btnNovaAtividade" class="btn">+ Atividade</button>
+        </div>
+        <div class="legend">
+          <strong>Legenda:</strong>
+          <span class="badge planned">Planejada</span>
+          <span class="badge running">Em Execução</span>
+          <span class="badge blocked">Bloqueada</span>
+          <span class="badge done">Concluída</span>
+          <span class="badge canceled">Cancelada</span>
+          <span class="badge gap">Lacuna</span>
+          <span class="badge heat">Heatmap capacidade (0–100% / >100%)</span>
+        </div>
+        <div id="gantt" class="gantt"></div>
+      </section>
+
+      <section class="grid-cards-layout">
+        <div class="column-recursos">
+          <h2>Recursos</h2>
+          <div id="recursos-container">
+            </div>
+        </div>
+        <div class="column-atividades">
+          <h2>Atividades</h2>
+          <div id="atividades-container" class="grid-cards">
+            </div>
+        </div>
+      </section>
+      <section class="panel" id="aggPanel">
+        <div class="toolbar">
+          <strong>Capacidade agregada</strong>
+          <label class="muted" style="margin-left:8px">Granularidade:</label>
+          <select id="aggGran">
+            <option value="weekly">Semanal</option>
+            <option value="monthly">Mensal</option>
+          </select>
+        </div>
+        <div id="aggCharts" class="agg-grid"></div>
+      </section>
+    </div>
+
+    <div id="tab-exec" class="tabpanel">
+      <section class="panel kpi" id="kpiPanel">
+        <h2>Visão Executiva</h2>
+        <div class="kpi-grid">
+          <div class="kpi-card"><span id="kpiExecucao">0%</span><label>% Execução</label></div>
+          <div class="kpi-card"><span id="kpiRecursos">0</span><label>Recursos Ativos</label></div>
+          <div class="kpi-card"><span id="kpiSobrecarga">0</span><label>Recursos Sobrecarregados</label></div>
+        </div>
+      </section>
+      <section class="panel" id="exec-overload-panel">
+        <div class="toolbar"><strong>Recursos Sobrecarregados — Detalhes</strong></div>
+        <div class="muted" id="overloadEmptyMsg">Nenhum recurso sobrecarregado no período.</div>
+        <div class="table-wrap" style="display:none" id="overloadDetailsWrap">
+          <table class="tbl" id="overloadDetails">
+            <thead>
+              <tr>
+                <th>Recurso</th>
+                <th>Período de Sobreposição</th>
+                <th>Atividades concorrentes</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Painel de risco por recurso (Fase 1 & 3) -->
+      <section class="panel" id="riskPanel">
+        <div class="toolbar">
+          <strong>Risco por Recurso</strong>
+        </div>
+        <!-- Explicação do cálculo do score de risco para executivos -->
+        <p class="muted" style="font-size: 12px; margin: 4px 0;">
+          <strong>Racional do Score de Risco:</strong> <br />
+          O score representa a soma dos <em>dias de sobrecarga</em> de cada recurso com um acréscimo
+          de <strong>5 pontos</strong> para recursos do tipo <em>externo</em>.<br />
+          <em>• Dias de sobrecarga:</em> quantidade de dias em que a alocação diária total de um recurso
+          supera sua capacidade disponível (100%).<br />
+          <em>• +5 para recursos externos:</em> refletindo maior risco decorrente da dependência de fornecedores externos.
+        </p>
+        <div class="group">
+          <label><input type="checkbox" id="riskOnlyToggle" checked /> Mostrar apenas recursos com risco</label>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl" id="tblRisco">
+            <thead>
+              <tr>
+                <th>Recurso</th>
+                <th>Tipo</th>
+                <th>Score de Risco</th>
+                <th>Dias com Sobrecarga</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+    
+    <div id="tab-avail" class="tabpanel">
+      <section class="panel">
+        <h2>Verificar Disponibilidade por Capacidade</h2>
+        <div class="filters" style="grid-template-columns: repeat(6, minmax(0,1fr));">
+          <div class="group">
+            <label>Dias necessários</label>
+            <input id="avDias" type="number" min="1" value="5"/>
+          </div>
+          <div class="group">
+            <label>Dias úteis apenas?</label>
+            <select id="avUteis">
+              <option value="1">Sim</option>
+              <option value="0">Não</option>
+            </select>
+          </div>
+          <div class="group">
+            <label>% capacidade requerida (dia)</label>
+            <input id="avPerc" type="number" min="1" max="1000" value="25"/>
+          </div>
+          <div class="group">
+            <label>Tipo</label>
+            <select id="avTipo">
+              <option value="">Todos</option>
+              <option>Interno</option>
+              <option>Externo</option>
+            </select>
+          </div>
+          <div class="group">
+            <label>Senioridade</label>
+            <select id="avSenioridade">
+              <option value="">Todas</option>
+              <option>Jr</option>
+              <option>Pl</option>
+              <option>Sr</option>
+              <option>NA</option>
+            </select>
+          </div>
+          <div class="group">
+            <label>Data de busca a partir de</label>
+            <input id="avInicio" type="date"/>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="avBtn" class="btn primary">Verificar disponibilidade</button>
+        </div>
+        <div id="avResultado" class="panel">
+          <div class="muted">Informe os parâmetros e clique em "Verificar disponibilidade".</div>
+        </div>
+      </section>
+    </div>
+
+    <div id="tab-cap" class="tabpanel">
+      <section class="panel">
+        <iframe src="capacidade_v4.html" style="width:100%; min-height:600px; border:none;" title="Calculadora de Capacidade"></iframe>
+      </section>
+    </div>
+
+    <div id="tab-util" class="tabpanel">
+      <section class="panel">
+        <h2>Exportações & Backup</h2>
+        <div class="actions stack">
+        <input id="currentUser" placeholder="Usuário atual (opcional)" class="userbox" />
+        <div class="inline-actions" id="bdControls">
+          <label class="btn">📄 Importar BD (somente leitura)
+            <input id="fileBD" type="file" accept=".xls,.html,.csv" class="hidden" />
+          </label>
+          <button id="btnPickBDFile" class="btn">📄 Selecionar BD (ler/gravar)</button>
+  <!-- Permite definir um arquivo de BD padrão; o sistema lembrará este local para apontar automaticamente na próxima abertura -->
+  <button id="btnSetDefaultBD" class="btn">📂 Definir BD padrão</button>
+          <button id="btnExportModeloXLS" class="btn">⬇️ Exportar modelo de BD (Excel)</button>
+          <button id="btnExportModeloCSV" class="btn">⬇️ Exportar modelo de BD (CSV único)</button>
+          <span id="bdStatus" class="muted"></span>
+        </div>
+
+        <!-- Caminho de rede para o banco de dados (permite copiar e armazenar) -->
+        <div class="bd-path-row">
+          <label for="bdPathInput">Caminho do BD de Rede</label>
+          <input id="bdPathInput" class="path-input" placeholder="\\\\servidor\\pasta\\arquivo.html" />
+          <button id="btnSavePath" class="btn">Salvar caminho</button>
+          <button id="btnCopyPath" class="btn">Copiar</button>
+        </div>
+        <!-- (removido row duplicada do caminho de BD) -->
+        <button id="btnExportCSV" class="btn">Exportar CSV (Recursos/Atividades)</button>
+        <button id="btnExportXLS" class="btn">Exportar Excel (XLS compatível)</button>
+        <button id="btnExportPBI" class="btn">Exportar CSV Power BI (diário)</button>
+        <button id="btnHistAll" class="btn">Histórico (CSV consolidado)</button>
+        <button id="btnBackup" class="btn">Backup (JSON)</button>
+        <button id="btnExportPDF" class="btn primary">Exportar PDF (Visão Geral)</button>
+
+        <!-- Importação em massa de dados (recursos e atividades) -->
+        <label class="btn">📁 Importar dados
+          <input id="fileImportData" type="file" accept=".csv" class="hidden" />
+        </label>
+        <button id="btnExportImportTemplate" class="btn">⬇️ Modelo de Importação</button>
+        </div>
+        <p class="muted">Dica: para alimentar por planilha, use "Selecionar BD (ler/gravar)" e o "Modelo de BD (Excel/CSV)". Se você usar "Importar BD (somente leitura)", as alterações não serão salvas no arquivo.</p>
+      </section>
+
+  <!-- Exportação filtrada da visão geral (Fase 4) -->
+  <section class="panel" id="exportFiltered">
+    <h3>Exportação Filtrada da Visão Geral</h3>
+    <div class="filters" style="grid-template-columns: repeat(5, minmax(0,1fr));">
+      <div class="group">
+        <label>Início do período</label>
+        <input id="expStart" type="date" />
+      </div>
+      <div class="group">
+        <label>Fim do período</label>
+        <input id="expEnd" type="date" />
+      </div>
+      <div class="group">
+        <label>Recurso(s)</label>
+        <input id="expResources" placeholder="Digite parte dos nomes (separar por vírgula)" />
+      </div>
+      <div class="group">
+        <label>Tipo</label>
+        <select id="expType">
+          <option value="">Todos</option>
+          <option value="Interno">Interno</option>
+          <option value="Externo">Externo</option>
+        </select>
+      </div>
+    </div>
+    <div class="toolbar">
+      <button id="btnExpCSV" class="btn">Exportar Visão Geral (CSV)</button>
+      <button id="btnExpPDF" class="btn">Exportar Visão Geral (PDF)</button>
+    </div>
+  </section>
+    </div>
+  </div>
+
+  <dialog id="dlgRecurso">
+    <form method="dialog" id="formRecurso" class="form">
+      <h3 id="dlgRecursoTitulo">Novo Recurso</h3>
+      <input type="hidden" name="id" />
+      <label>Nome <input name="nome" required /></label>
+      <div class="grid2">
+        <label>Tipo
+          <select name="tipo">
+            <option>Interno</option>
+            <option>Externo</option>
+          </select>
+        </label>
+        <label>Senioridade
+          <select name="senioridade">
+            <option>Jr</option>
+            <option>Pl</option>
+            <option>Sr</option>
+            <option>NA</option>
+          </select>
+        </label>
+      </div>
+      <div class="grid2">
+        <label>Ativo <input type="checkbox" name="ativo" checked /></label>
+        <label>Capacidade diária (%) <input type="number" name="capacidade" min="1" max="1000" value="100" /></label>
+      </div>
+      <div class="grid2">
+        <label>Início ativo (opcional) <input type="date" name="inicioAtivo" /></label>
+        <label>Fim ativo (opcional) <input type="date" name="fimAtivo" /></label>
+      </div>
+      <menu>
+        <button value="cancel" type="button" formnovalidate onclick="this.closest('dialog').close('cancel')">Cancelar</button>
+        <button id="btnSalvarRecurso" value="save" class="primary">Salvar</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="dlgAtividade">
+    <form method="dialog" id="formAtividade" class="form">
+      <h3 id="dlgAtividadeTitulo">Nova Atividade</h3>
+      <input type="hidden" name="id" />
+      <label>Título <input name="titulo" required /></label>
+      <label>Recurso
+        <input id="resourceNameInput" name="resourceName" list="resourceList" autocomplete="off" placeholder="Digite para buscar um recurso" required />
+      </label>
+      <div class="grid2">
+        <label>Início <input type="date" name="inicio" required /></label>
+        <label>Fim <input type="date" name="fim" required /></label>
+      </div>
+      <div class="grid2">
+        <label>Status
+          <select name="status">
+            <option>Planejada</option>
+            <option>Em Execução</option>
+            <option>Bloqueada</option>
+            <option>Concluída</option>
+            <option>Cancelada</option>
+          </select>
+        </label>
+        <label>Alocação diária (%) <input type="number" name="alocacao" min="1" max="1000" value="100" /></label>
+      </div>
+      <label>Tags (separadas por vírgula)
+          <input name="tags" list="existingTags" placeholder="Ex: SAP, Teste, Documentação" />
+      </label>
+      <menu>
+        <button value="cancel" type="button" formnovalidate onclick="this.closest('dialog').close('cancel')">Cancelar</button>
+        <button id="btnSalvarAtividade" value="save" class="primary">Salvar</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="dlgJust">
+    <form method="dialog" id="formJust" class="form">
+      <h3>Justificativa da alteração de datas</h3>
+      <p id="justResumo" class="muted"></p>
+      <label>Justificativa
+        <textarea name="just" required rows="4" placeholder="Descreva a razão da alteração de datas..."></textarea>
+      </label>
+      <menu>
+        <button value="cancel" type="button" formnovalidate onclick="this.closest('dialog').close('cancel')">Cancelar</button>
+        <button id="btnJustConfirm" value="confirm" class="primary">Confirmar</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="dlgHist">
+    <form method="dialog" class="form">
+      <h3>Histórico da Atividade</h3>
+      <div class="filters" style="margin:8px 0 10px 0; grid-template-columns:1fr 1fr 1fr 1fr 1fr 1fr;">
+        <div class="group"><label>De</label><input id="histStart" type="date"/></div>
+        <div class="group"><label>Até</label><input id="histEnd" type="date"/></div>
+        <div class="group"><label>&nbsp;</label><button id="histApply" class="btn">Aplicar filtro</button></div>
+      </div>
+      <div id="histList" style="max-height:300px; overflow:auto; border:1px solid #e2e8f0; border-radius:10px; padding:8px; background:#f8fafc"></div>
+      <menu>
+        <button id="btnHistExport" class="btn">Exportar CSV</button>
+        <button value="close" class="primary">Fechar</button>
+      </menu>
+    </form>
+  </dialog>
+  
+  <datalist id="existingTags"></datalist>
+  <!-- Datalist para nomes de recursos ativos -->
+  <datalist id="resourceList"></datalist>
+  <div id="tooltip" class="tooltip hidden"></div>
+  <script src="./app.js"></script>
+  <script src="enhancer2.js"></script>
+  <script src="planner_enhancer.js"></script>
+
+  <!-- Overlay para aguardar salvamento do BD por outra sessão. Exibido quando detectamos que outra sessão está salvando -->
+  <div id="bdWaitOverlay" style="display:none; position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+    <div class="overlay-content" style="background:#1e293b; color:#f1f5f9; padding:20px 30px; border-radius:8px; text-align:center;">
+      <p>Outra sessão está salvando. Aguarde...</p>
+      <p>Segundos restantes: <span id="bdWaitCountdown">0</span></p>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    <p>
+      <strong>Desenvolvido por Maycon Douglas</strong><br>
+      <em>Construtor de Soluções Assistidas por IA: unindo visão, criatividade e tecnologia para transformar necessidades em ferramentas práticas.</em><br>
+      <a href="https://www.linkedin.com/in/maycon-douglas-327537146" target="_blank" rel="noopener noreferrer">Conecte-se comigo no LinkedIn</a>
+    </p>
+  </footer>
+  <script>
+    // Registro do Service Worker para modo instalável (PWA)
+    (function(){
+      if (!("serviceWorker" in navigator)) return;
+      window.addEventListener("load", function(){
+        navigator.serviceWorker.register("./sw.js").catch(function(){});
+      });
+    })();
+  </script>
+</body>
+</html>

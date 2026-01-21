@@ -1,0 +1,576 @@
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#0f172a;background:#f8fafc}
+.container{max-width:1200px;margin:0 auto;padding:16px}
+.topbar{display:flex;gap:16px;justify-content:space-between;align-items:flex-end;margin-bottom:12px}
+h1{margin:0 0 6px 0;font-size:22px}
+.muted{margin:0;color:#475569;font-size:13px}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.btn{background:#e2e8f0;border:1px solid #cbd5e1;border-radius:10px;padding:8px 12px;cursor:pointer}
+.btn:hover{background:#cbd5e1}
+.btn.primary{background:#059669;color:#fff;border-color:#047857}
+.btn.primary:hover{background:#047857}
+.btn.danger{background:#fee2e2;border-color:#fecaca}
+.btn.danger:hover{background:#fecaca}
+.hidden{display:none}
+.userbox{border:1px solid #cbd5e1;border-radius:8px;padding:8px;background:#fff}
+
+.panel{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:12px;margin-bottom:12px}
+.filters{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.filters .group{display:flex;flex-direction:column;gap:6px}
+.filters .group.grow{grid-column:span 2}
+.filters label{font-size:12px;color:#334155}
+.filters input,.filters select{border:1px solid #cbd5e1;border-radius:8px;padding:8px;background:#fff}
+
+.toolbar{display:flex;gap:8px;margin-bottom:8px}
+.legend{display:flex;gap:8px;flex-wrap:wrap;font-size:12px;margin-bottom:8px;align-items:center}
+.badge{padding:2px 8px;border-radius:8px;border:1px solid #cbd5e1;background:#f1f5f9}
+.badge.planned{background:#bfdbfe;border-color:#60a5fa}
+.badge.running{background:#bbf7d0;border-color:#16a34a}
+.badge.blocked{background:#fecaca;border-color:#ef4444}
+.badge.done{background:#e5e7eb;border-color:#9ca3af}
+.badge.canceled{background:#f4f4f5;border-color:#d4d4d8}
+.badge.gap{background:#f8fafc;border-style:dashed}
+.badge.heat{background:#fde68a;border-color:#f59e0b}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl thead th{color:#64748b;font-weight:600;text-align:left;padding:8px;border-bottom:1px solid #e2e8f0}
+.tbl tbody td{padding:8px;border-bottom:1px solid #f1f5f9}
+.tbl tbody tr:hover{background:#f8fafc}
+.tbl .actions{display:flex;gap:6px;justify-content:flex-end}
+
+/* Collapsible panels for Planning tab */
+.panel.collapsible h2,
+.panel.collapsible h3,
+.panel.collapsible h4{
+  cursor:pointer;
+  user-select:none;
+}
+.panel.collapsible.collapsed > *:not(h2):not(h3):not(h4):not(.toolbar):not(.actions){
+  display:none;
+}
+
+.gantt{border:1px solid #e2e8f0;border-radius:12px;overflow:auto}
+.gantt .header{position:sticky;top:0;background:#fff;border-bottom:1px solid #e2e8f0;z-index:10;display:flex}
+.gantt .col-fixed{width:220px;flex:0 0 auto;border-right:1px solid #e5e7eb;padding:8px;background:#fff;position:sticky;left:0;z-index:11}
+.gantt .col-grid{flex:1;min-width:600px}
+.grid-days{display:grid}
+.cell-day{border-left:1px solid #f1f5f9;text-align:center;font-size:10px;padding:4px 0}
+.row{display:flex;border-bottom:1px solid #f1f5f9;align-items:stretch}
+.row .info{width:220px;flex:0 0 auto;border-right:1px solid #f1f5f9;padding:8px;background:#fff;position:sticky;left:0;z-index:1}
+.row .bargrid{flex:1;position:relative}
+.activity{height:20px;border-radius:6px;border:1px solid #94a3b8;padding:0 6px;font-size:11px;display:flex;align-items:center;position:absolute;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.activity.planejada{background:#bfdbfe;border-color:#60a5fa}
+.activity.execucao{background:#bbf7d0;border-color:#16a34a}
+.activity.bloqueada{background:#fecaca;border-color:#ef4444}
+.activity.concluida{background:#e5e7eb;border-color:#9ca3af}
+.activity.cancelada{background:#f4f4f5;border-color:#d4d4d8}
+
+.gapblock{position:absolute;height:20px;border:1px dashed #cbd5e1;background:#f8fafc;border-radius:6px}
+.heatcell{position:absolute;top:0;bottom:0;border-left:1px solid #f1f5f9;opacity:.4}
+.heat-ok{background:#22c55e}
+.heat-high{background:#eab308}
+.heat-over{background:#ef4444}
+
+.tooltip{position:fixed;max-width:360px;background:#0f172a;color:#fff;padding:8px 10px;border-radius:10px;border:1px solid #334155;box-shadow:0 10px 18px rgba(0,0,0,.2);font-size:12px;z-index:1000;pointer-events:none}
+.tooltip.hidden{display:none}
+.tooltip .t-title{font-weight:700;margin-bottom:6px}
+.tooltip .t-row{padding:4px 0;border-top:1px solid rgba(255,255,255,.1)}
+.tooltip .t-row:first-of-type{border-top:none}
+.tooltip .muted{color:#cbd5e1}
+
+/* === Responsive Enhancements (v13) === */
+/* Fluid container and flexible toolbar spacing */
+.container{max-width:1200px;margin:0 auto;padding:0 12px}
+.toolbar,.actions{flex-wrap:wrap;gap:12px}
+/* Responsive grid for entries in Gestão de Horas */
+.rv-entry{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;align-items:center}
+@media (max-width:1080px){
+  .rv-entry{grid-template-columns:1fr 1fr}
+}
+@media (max-width:640px){
+  .rv-entry{grid-template-columns:1fr}
+  .rv-entry input,
+  .rv-entry select,
+  .rv-entry button{width:100%;max-width:100%}
+}
+/* Stacked table layout on small screens */
+@media (max-width:860px){
+  .tbl thead{display:none}
+  .tbl, .tbl tbody, .tbl tr, .tbl td{display:block;width:100%}
+  .tbl tr{margin-bottom:10px;border:1px solid #e5e7eb;border-radius:10px;padding:8px;background:#fff}
+  .tbl td{border:none;padding:6px 8px;position:relative}
+  .tbl td[data-label]::before{content:attr(data-label) ' ';font-weight:600;color:#334155;position:absolute;left:8px;top:6px}
+  .tbl td[data-label]{padding-left:140px}
+}
+/* Minor spacing adjustments for very small screens */
+@media (max-width:480px){
+  .panel{padding:10px}
+  .actions{gap:6px}
+  .rv-entry{gap:6px}
+}
+
+.ccell{position:absolute;top:2px;right:2px;min-width:16px;height:16px;line-height:16px;border-radius:9px;background:#1e293b;color:#fff;font-size:10px;text-align:center;padding:0 4px;opacity:.9}
+.ccell.low{background:#334155}
+.ccell.med{background:#2563eb}
+.ccell.high{background:#be185d}
+
+/* === Destaques de finais de semana (Gantt) === */
+/* Células de dia no cabeçalho do Gantt que representam sábados e domingos
+   recebem um fundo mais claro para destacar visualmente os finais de semana. */
+.cell-day.weekend{
+  background:#f8fafc;
+}
+/* Anteriormente reduzíamos a opacidade das células de ocupação (heatcell) nos finais de semana.
+   Essa regra foi removida para evitar sobrepor as atividades; agora apenas o fundo da grade
+   marca visualmente os fins de semana. */
+
+.agg-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.card{border:1px solid #e2e8f0;border-radius:12px;background:#fff;padding:10px}
+.card h3{margin:0 0 8px 0;font-size:14px}
+/* Aumenta a altura visual do canvas para acomodar melhor as datas (eixo X) rotacionadas */
+canvas.chart{width:100%;height:180px;border:1px solid #f1f5f9;border-radius:10px;background:#fafafa}
+
+.dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog{border:none;border-radius:14px;max-width:520px;width:92%;padding:0}
+.form{padding:16px}
+.form h3{margin:0 0 10px 0}
+.form label{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.form .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form menu{display:flex;justify-content:flex-end;gap:8px;margin:10px 0 0 0;padding:0}
+.form menu button{padding:8px 12px;border-radius:10px;border:1px solid #cbd5e1;background:#e2e8f0;cursor:pointer}
+.form menu button.primary{background:#2563eb;color:#fff;border-color:#1d4ed8}
+
+.tabs{display:flex;gap:8px;margin:10px 0}
+.tab{border:1px solid #cbd5e1;background:#f1f5f9;border-radius:10px;padding:8px 12px;cursor:pointer}
+.tab.active{background:#2563eb;color:#fff;border-color:#1d4ed8}
+.tabpanel{display:none}
+.tabpanel.active{display:block}
+.actions.stack{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.chipset{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid #cbd5e1;background:#f1f5f9;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer;user-select:none}
+.chip.active{background:#2563eb;color:#fff;border-color:#1d4ed8}
+
+.inline-actions{display:flex;margin-top:6px;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* === Campo de caminho de BD de rede (exportações & backup) === */
+.bd-path-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 8px;
+}
+.bd-path-row label {
+  font-size: 12px;
+  color: #334155;
+  flex: 0 0 auto;
+}
+.bd-path-row .path-input {
+  flex: 1;
+  min-width: 200px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+}
+
+/* Ajuste de margem para toolbar na exportação filtrada */
+/* Aumenta o espaço entre os campos de filtro e os botões de exportação na
+   seção de exportação filtrada para melhorar a legibilidade */
+#exportFiltered .toolbar {
+  margin-top: 20px;
+}
+
+/* KPIs Executivos */
+.kpi-grid{display:flex;gap:16px;flex-wrap:wrap}
+.kpi-card{flex:1;min-width:120px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:12px;padding:12px;text-align:center}
+.kpi-card span{font-size:20px;font-weight:700;display:block;margin-bottom:6px}
+/* Estilos para a Assinatura (Rodapé) */
+.app-footer {
+  text-align: center;
+  margin-top: 32px;
+  padding: 24px 0;
+  border-top: 1px solid #e2e8f0; /* Linha sutil para separar do conteúdo */
+  font-size: 13px;
+  color: #64748b; /* Cor de texto mais suave */
+}
+
+.app-footer p {
+  margin: 0;
+  line-height: 1.6; /* Melhora a legibilidade */
+}
+
+.app-footer em {
+  font-style: italic;
+  color: #475569;
+}
+
+.app-footer a {
+  color: #059669; /* Cor verde do botão primário para destaque */
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.app-footer a:hover {
+  text-decoration: underline;
+}
+
+/* Estilo para a badge de tag */
+.badge.tag {
+    background-color: #e0e7ff;
+    border-color: #a5b4fc;
+    color: #3730a3;
+}
+/* ===== MELHORIAS VISUAIS (LAYOUT DE CARDS) ===== */
+
+/* 1. Estrutura de Colunas e Grade */
+.grid-cards-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr; /* Coluna de recursos fixa, atividades flexível */
+  gap: 16px;
+  align-items: start;
+}
+
+.column-recursos h2, .column-atividades h2 {
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  color: #1e293b;
+}
+
+.column-recursos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); /* Grade responsiva */
+  gap: 12px;
+}
+
+/* 2. Seções Colapsáveis para Recursos */
+.resource-group {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 8px;
+}
+.resource-group summary {
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px;
+  color: #334155;
+}
+.resource-group[open] {
+  background: #f8fafc;
+}
+.resource-group[open] summary {
+  margin-bottom: 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+/* 3. Estilo Base dos Cards */
+.resource-card, .activity-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.resource-card:hover, .activity-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.06);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.card-header strong {
+  font-size: 14px;
+  color: #0f172a;
+}
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.card-footer {
+  margin-top: auto; /* Alinha no final do card */
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}
+
+/* 4. Ações e Botões de Ícone */
+.card-actions {
+  display: flex;
+  gap: 4px;
+}
+.btn-icon {
+  width: 24px;
+  height: 24px;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0.6;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 16px;
+  transition: opacity 0.2s, background-color 0.2s;
+  border-radius: 4px;
+}
+.btn-icon:hover {
+  opacity: 1;
+  background-color: #f1f5f9;
+}
+.btn-icon.edit { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23475569"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828zM5 12V7a1 1 0 011-1h2.586l-2 2H6v2.586l-2 2V12zM3 15a2 2 0 002 2h10a2 2 0 002-2v-2.586l-2-2V15H5v-2.586l-2-2V15z"/></svg>'); }
+.btn-icon.duplicate { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23475569"><path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a1 1 0 011-1h14a1 1 0 110 2H3a1 1 0 01-1-1z"/></svg>'); }
+.btn-icon.history { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23475569"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clip-rule="evenodd"/></svg>'); }
+.btn-icon.delete { background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23ef4444"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>'); }
+
+/* 5. Hierarquia Visual (Chips, Badges, Barras) */
+.chip {
+  display: inline-block;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+.chip.tag {
+  background-color: #e0e7ff;
+  border-color: #a5b4fc;
+  color: #3730a3;
+}
+.tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.status-badge {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: #fff;
+}
+.status-badge.status-planejada { background-color: #f59e0b; } /* Amarelo */
+.status-badge.status-em-execução { background-color: #16a34a; } /* Verde */
+.status-badge.status-bloqueada { background-color: #dc2626; } /* Vermelho */
+.status-badge.status-concluída { background-color: #6b7280; } /* Cinza */
+.status-badge.status-cancelada { background-color: #9ca3af; } /* Cinza claro */
+
+.activity-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.allocation-bar-container {
+  width: 100%;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.allocation-bar {
+  height: 100%;
+  background: #3b82f6; /* Azul */
+  border-radius: 4px;
+}
+.allocation-overload {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  right: -10px; /* Extrapola para indicar sobrecarga */
+  height: 100%;
+  background: #ef4444; /* Vermelho */
+}
+
+/* 6. Cores Temáticas */
+.resource-card.type-interno { border-left: 4px solid #3b82f6; } /* Azul */
+.resource-card.type-externo { border-left: 4px solid #8b5cf6; } /* Roxo */
+
+/* 7. Responsividade */
+@media (max-width: 800px) {
+  .grid-cards-layout {
+    grid-template-columns: 1fr; /* Colunas empilhadas */
+  }
+}
+
+/* Esconde as tabelas antigas se ainda existirem */
+#tblRecursos, #tblAtividades {
+    display: none;
+}
+/* Em styles.css */
+
+/* --- MELHORIAS PARA GESTÃO DE HORAS (ENHANCER2.JS) --- */
+
+/* 1. Cores contextuais para o resumo e outros elementos */
+.color-planned { color: #475569; } /* Cinza */
+.color-executed { color: #16a34a; } /* Verde */
+.color-balance { color: #2563eb; } /* Azul */
+
+/* 2. Estilo aprimorado para as tabelas da aba */
+.rv-table-enhanced {
+  width: 100%;
+  border-collapse: separate; /* Necessário para border-radius nas células */
+  border-spacing: 0;
+  font-size: 14px;
+}
+
+.rv-table-enhanced thead th {
+  background-color: #f8fafc;
+  padding: 12px 10px;
+  border-bottom: 2px solid #e2e8f0;
+  text-align: left;
+  font-weight: 600;
+  color: #334155;
+  position: sticky; /* Cabeçalho fixo */
+  top: 0;
+  z-index: 10;
+}
+
+.rv-table-enhanced tbody td {
+  padding: 14px 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.rv-table-enhanced tbody tr:nth-child(even) {
+  background-color: #f8fafc; /* Efeito zebrado suave */
+}
+
+/* 3. Alinhamento de colunas */
+.rv-table-enhanced .align-left { text-align: left; }
+.rv-table-enhanced .align-right { text-align: right; font-family: monospace; }
+
+/* 4. Badges de Status (Exemplo) */
+.badge-status {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+}
+.badge-status.ativo { background-color: #16a34a; } /* Verde */
+.badge-status.encerrado { background-color: #6b7280; } /* Cinza */
+
+/* 5. Ícones de apoio */
+.icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 6px;
+  vertical-align: -0.125em;
+}
+
+/* 6. Mini Progress Bar */
+.mini-progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mini-progress {
+  width: 100%;
+  height: 8px;
+  background-color: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.mini-progress-bar {
+  height: 100%;
+  background-color: #16a34a; /* Verde */
+  border-radius: 4px;
+  transition: width 0.3s ease-in-out;
+}
+.mini-progress-bar.over {
+  background-color: #ef4444; /* Vermelho para > 100% */
+}
+
+/* 7. Botões de ícone e menu de ações */
+.actions-cell {
+  text-align: right;
+}
+.actions-cell .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: background-color 0.2s, opacity 0.2s;
+}
+.actions-cell .btn-icon:hover {
+  background-color: #f1f5f9;
+  opacity: 1;
+}
+.actions-cell .btn-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ===== Indicador de status do banco de dados ===== */
+.db-status {
+  margin-top: 4px;
+  font-size: 13px;
+}
+.db-status-banner{
+  margin-top: 0;
+  font-size: 14px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+.db-status-banner.ok{
+  background-color: #dcfce7;
+  color: #166534;
+}
+.db-status-banner.warning{
+  background-color: #fee2e2;
+  color: #7f1d1d;
+}
+
+/* ===== Campo para salvar caminho do banco de dados ===== */
+.bd-path-row {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.bd-path-row label {
+  font-size: 13px;
+  color: #475569;
+  margin-right: 4px;
+}
+.bd-path-row .path-input {
+  flex: 1 1 auto;
+  min-width: 180px;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+}
+
+/* Espaço extra entre filtros e botões na exportação filtrada */
+#exportFiltered .toolbar {
+  /* Espaço maior entre filtros e botões na exportação filtrada para melhor legibilidade */
+  margin-top: 20px;
+}
+.db-status.ok {
+  color: #15803d; /* verde */
+}
+.db-status.warning {
+  color: #b91c1c; /* vermelho */
+}
