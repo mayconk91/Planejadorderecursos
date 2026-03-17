@@ -2,6 +2,8 @@
 .container{max-width:1200px;margin:0 auto;padding:16px}
 .topbar{display:flex;gap:16px;justify-content:space-between;align-items:flex-end;margin-bottom:12px}
 h1{margin:0 0 6px 0;font-size:22px}
+.topbar-title-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.app-version-badge{display:inline-flex;align-items:center;justify-content:center;padding:3px 10px;border-radius:999px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:700;letter-spacing:.02em;box-shadow:0 1px 2px rgba(15,23,42,.06)}
 .muted{margin:0;color:#475569;font-size:13px}
 .actions{display:flex;flex-wrap:wrap;gap:8px}
 .btn{background:#e2e8f0;border:1px solid #cbd5e1;border-radius:10px;padding:8px 12px;cursor:pointer}

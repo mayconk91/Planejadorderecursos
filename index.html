@@ -14,7 +14,10 @@
   <div class="container">
     <header class="topbar">
       <div>
-        <h1>Planejador de Recursos — Offline</h1>
+        <div class="topbar-title-row">
+          <h1>Planejador de Recursos — Offline</h1>
+          <span id="appVersionBadge" class="app-version-badge" title="Versão da aplicação">v--</span>
+        </div>
         <p class="muted">
           Cadastro de recursos e atividades, timeline por recurso, filtros combinados, busca, indicadores de capacidade por dia e exportações (Excel/CSV) para Power BI. Histórico de alterações com justificativa.
         </p>
@@ -109,9 +112,13 @@
         </div>
       </section>
       <section class="panel" id="aggPanel">
-        <div class="toolbar">
+        <div class="toolbar" style="gap:10px; flex-wrap:wrap;">
           <strong>Capacidade agregada</strong>
-          <label class="muted" style="margin-left:8px">Granularidade:</label>
+          <div id="aggViewTabs" class="tabs" style="margin-left:8px;">
+            <button type="button" class="tab active" data-agg-view="percent">Capacidade agregada (%)</button>
+            <button type="button" class="tab" data-agg-view="hours">Carga horária diária (h)</button>
+          </div>
+          <label class="muted" id="aggGranLabel" style="margin-left:8px">Granularidade:</label>
           <select id="aggGran">
             <option value="weekly">Semanal</option>
             <option value="monthly">Mensal</option>
@@ -335,6 +342,10 @@
       <div class="grid2">
         <label>Ativo <input type="checkbox" name="ativo" checked /></label>
         <label>Capacidade diária (%) <input type="number" name="capacidade" min="1" max="1000" value="100" /></label>
+      </div>
+      <div class="grid2">
+        <label>Carga horária diária (h) <input type="number" name="cargaHorariaDiaria" min="1" max="24" step="0.5" value="9" /></label>
+        <div></div>
       </div>
       <div class="grid2">
         <label>Início ativo (opcional) <input type="date" name="inicioAtivo" /></label>

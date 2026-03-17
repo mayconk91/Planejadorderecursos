@@ -46,6 +46,12 @@ function normalizeTag(tag) {
 const TIPOS=["Interno","Externo"];
 const SENIORIDADES=["Jr","Pl","Sr","NA"];
 const STATUS=["Planejada","Em Execução","Bloqueada","Concluída","Cancelada"];
+const DEFAULT_DAILY_HOURS = 9;
+const APP_META = {
+  version: 'v1.2.1',
+  date: '17/03/2026',
+  notes: 'Versão visível na interface + carga horária diária e disponibilidade por recurso'
+};
 
 // ===== Persistência =====
 // Principais chaves para arrays de domínio
@@ -761,6 +767,7 @@ resources = (resources || []).map(r => {
   const nowTs = Date.now();
   return {
     ...r,
+    cargaHorariaDiaria: Math.max(1, Number(r.cargaHorariaDiaria ?? r.carga_horaria_diaria ?? r.horasDia ?? DEFAULT_DAILY_HOURS)),
     version: typeof r.version === 'number' ? r.version : 1,
     updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : nowTs,
     deletedAt: r.deletedAt || null
@@ -843,6 +850,8 @@ const fileRestore=document.getElementById("fileRestore");
 const tooltip=document.getElementById("tooltip");
 const aggGran=document.getElementById("aggGran");
 const aggCharts=document.getElementById("aggCharts");
+const aggGranLabel=document.getElementById("aggGranLabel");
+let aggView="percent";
 
 let currentUser = loadLS(LS.user, "");
 if(currentUserInput){ currentUserInput.value=currentUser; currentUserInput.oninput=()=>{ currentUser=currentUserInput.value.trim(); saveLS(LS.user,currentUser); }; }
@@ -854,8 +863,16 @@ function activateTab(name){
   document.querySelectorAll('.tabpanel').forEach(p=>p.classList.toggle('active', p.id==='tab-'+name));
 }
 document.addEventListener('click', (ev)=>{
-  const b=ev.target.closest('.tab'); if(!b) return;
+  const b=ev.target.closest('.tab'); if(!b || !b.dataset.tab) return;
   activateTab(b.dataset.tab);
+});
+document.addEventListener('click', (ev)=>{
+  const b=ev.target.closest('[data-agg-view]'); if(!b) return;
+  aggView = b.dataset.aggView || 'percent';
+  document.querySelectorAll('[data-agg-view]').forEach(btn=>btn.classList.toggle('active', btn===b));
+  if(aggGran){ aggGran.style.display = aggView === 'percent' ? '' : 'none'; }
+  if(aggGranLabel){ aggGranLabel.style.display = aggView === 'percent' ? '' : 'none'; }
+  renderAggregates();
 });
 
 // ===== Chips de status =====
@@ -893,6 +910,7 @@ document.getElementById("btnNovoRecurso").onclick=()=>{
   formRecurso.reset();
   formRecurso.elements["id"].value="";
   formRecurso.elements["capacidade"].value=100;
+  formRecurso.elements["cargaHorariaDiaria"].value=DEFAULT_DAILY_HOURS;
   dlgRecurso.showModal();
 };
 document.getElementById("btnSalvarRecurso").onclick=()=>{
@@ -915,6 +933,7 @@ document.getElementById("btnSalvarRecurso").onclick=()=>{
     senioridade:f["senioridade"].value,
     ativo:f["ativo"].checked,
     capacidade:Math.max(1,Number(f["capacidade"].value||100)),
+    cargaHorariaDiaria: Math.max(1, Number(f["cargaHorariaDiaria"].value || DEFAULT_DAILY_HOURS)),
     inicioAtivo:f["inicioAtivo"].value||"",
     fimAtivo:f["fimAtivo"].value||"",
     version: version,
@@ -1150,6 +1169,7 @@ function renderTables(filteredActs){
           <span class="chip">${r.senioridade}</span>
           <span class="chip">${r.ativo ? "Ativo" : "Inativo"}</span>
           <span class="chip">📊 Cap: ${r.capacidade || 100}%</span>
+          <span class="chip">⏱️ ${getResourceDailyHours(r)}h/dia</span>
         </div>
         ${(r.inicioAtivo || r.fimAtivo) ? `<div class="card-footer muted small">📅 ${r.inicioAtivo || '...'} → ${r.fimAtivo || '...'}</div>` : ''}
       `;
@@ -1162,6 +1182,7 @@ function renderTables(filteredActs){
         formRecurso.elements["senioridade"].value=r.senioridade;
         formRecurso.elements["ativo"].checked=!!r.ativo;
         formRecurso.elements["capacidade"].value=r.capacidade||100;
+        formRecurso.elements["cargaHorariaDiaria"].value=getResourceDailyHours(r);
         formRecurso.elements["inicioAtivo"].value=r.inicioAtivo||"";
         formRecurso.elements["fimAtivo"].value=r.fimAtivo||"";
         dlgRecurso.showModal();
@@ -1380,6 +1401,65 @@ function buildDays(){
   return out;
 }
 
+function getResourceDailyHours(resource){
+  return Math.max(1, Number(resource?.cargaHorariaDiaria ?? DEFAULT_DAILY_HOURS));
+}
+
+function computeResourceDayLoadMap(filteredActs, days){
+  const dayKeys = days.map(toYMD);
+  const visibleDays = new Set(dayKeys);
+  const map = {};
+  (resources || []).forEach(r=>{
+    map[r.id] = {};
+    const jornada = getResourceDailyHours(r);
+    const cap = Math.max(1, Number(r.capacidade || 100));
+    dayKeys.forEach(key=>{
+      map[r.id][key] = {
+        jornadaHoras: jornada,
+        capacidadePercentual: cap,
+        alocadoPercentual: 0,
+        horasAlocadas: 0,
+        horasDisponiveis: jornada,
+        excessoHoras: 0,
+        activeActs: []
+      };
+    });
+  });
+  (filteredActs || []).forEach(a=>{
+    if(a.deletedAt) return;
+    const resource = resources.find(r=>r.id===a.resourceId);
+    if(!resource || !map[resource.id]) return;
+    const jornada = getResourceDailyHours(resource);
+    const cap = Math.max(1, Number(resource.capacidade || 100));
+    const start = fromYMD(a.inicio);
+    const end = fromYMD(a.fim);
+    for(let d=new Date(start); d<=end; d=addDays(d,1)){
+      const key = toYMD(d);
+      if(!visibleDays.has(key)) continue;
+      const entry = map[resource.id][key];
+      if(!entry) continue;
+      const perc = Number(a.alocacao || 100);
+      const horas = jornada * (perc / cap);
+      entry.alocadoPercentual += perc;
+      entry.horasAlocadas += horas;
+      entry.activeActs.push({...a, horasAlocadasDia: horas});
+    }
+  });
+  Object.keys(map).forEach(resourceId=>{
+    Object.keys(map[resourceId]).forEach(dayKey=>{
+      const entry = map[resourceId][dayKey];
+      entry.horasDisponiveis = Math.max(0, entry.jornadaHoras - entry.horasAlocadas);
+      entry.excessoHoras = Math.max(0, entry.horasAlocadas - entry.jornadaHoras);
+    });
+  });
+  return map;
+}
+
+function formatHourValue(value){
+  const n = Number(value || 0);
+  return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, '');
+}
+
 function renderGantt(filteredActs){
   gantt.innerHTML="";
   const days=buildDays();
@@ -1444,6 +1524,7 @@ function renderGantt(filteredActs){
   const byRes=Object.fromEntries(resources.map(r=>[r.id,[]]));
   filteredActs.forEach(a=>{ if(byRes[a.resourceId]) byRes[a.resourceId].push(a); });
   Object.keys(byRes).forEach(k=>byRes[k].sort((a,b)=>fromYMD(a.inicio)-fromYMD(b.inicio)));
+  const dailyLoadMap = computeResourceDayLoadMap(filteredActs, days);
 
   resources.forEach(r=>{
     // Aplicar filtros básicos: tipo (Interno/Externo), senioridade, ativo e busca por nome do recurso.
@@ -1463,7 +1544,7 @@ function renderGantt(filteredActs){
     const info=document.createElement("div");
     info.className="info";
     info.innerHTML=`<div style="font-weight:600">${r.nome}</div>
-      <div class="muted" style="font-size:12px">${r.tipo} • ${r.senioridade} • Cap: ${r.capacidade}%${(r.inicioAtivo||r.fimAtivo)? " • Janela: " + (r.inicioAtivo||"…") + " → " + (r.fimAtivo||"…") : ""}</div>`;
+      <div class="muted" style="font-size:12px">${r.tipo} • ${r.senioridade} • Cap: ${r.capacidade}% • ${formatHourValue(getResourceDailyHours(r))}h/dia${(r.inicioAtivo||r.fimAtivo)? " • Janela: " + (r.inicioAtivo||"…") + " → " + (r.fimAtivo||"…") : ""}</div>`;
 
     const bargrid=document.createElement("div");
     bargrid.className="bargrid";
@@ -1471,8 +1552,9 @@ function renderGantt(filteredActs){
     const cap=r.capacidade||100;
     days.forEach((d,i)=>{
       const dy=toYMD(d);
-      const activeActs = acts.filter(a=>fromYMD(a.inicio)<=d && d<=fromYMD(a.fim));
-      const sum=activeActs.reduce((acc,a)=>acc+(a.alocacao||100),0);
+      const dayLoad = (dailyLoadMap[r.id] || {})[dy] || { jornadaHoras: getResourceDailyHours(r), alocadoPercentual: 0, horasAlocadas: 0, horasDisponiveis: getResourceDailyHours(r), excessoHoras: 0, activeActs: [] };
+      const activeActs = dayLoad.activeActs || [];
+      const sum=dayLoad.alocadoPercentual || 0;
       const perc=cap? (sum/cap)*100 : 0;
       const heat=document.createElement("div");
       heat.className="heatcell";
@@ -1484,8 +1566,15 @@ function renderGantt(filteredActs){
       if(perc>100) heat.classList.add("heat-over");
       else if(perc>0) heat.classList.add(perc>70?"heat-high":"heat-ok");
       heat.onmouseenter=(ev)=>{
-        const rows = activeActs.map(a=>`<div class="t-row"><strong>${a.titulo}</strong> — ${a.alocacao||100}% (${a.status})</div>`).join("");
-        tooltip.innerHTML = `<div class="t-title">${r.nome} — ${dy}</div><div class="muted">Ocupação: ${Math.round(perc)}% (cap ${cap}%) • Concorrência: ${activeActs.length}</div>${rows}`;
+        const rows = activeActs.map(a=>`<div class="t-row"><strong>${a.titulo}</strong> — ${a.alocacao||100}% • ${formatHourValue(a.horasAlocadasDia || 0)}h (${a.status})</div>`).join("");
+        const saldoLinha = dayLoad.excessoHoras > 0
+          ? `<div class="muted">Excesso: ${formatHourValue(dayLoad.excessoHoras)}h</div>`
+          : `<div class="muted">Horas disponíveis: ${formatHourValue(dayLoad.horasDisponiveis)}h</div>`;
+        tooltip.innerHTML = `<div class="t-title">${r.nome} — ${dy}</div>
+          <div class="muted">Jornada do dia: ${formatHourValue(dayLoad.jornadaHoras)}h</div>
+          <div class="muted">Horas alocadas: ${formatHourValue(dayLoad.horasAlocadas)}h</div>
+          ${saldoLinha}
+          <div class="muted">Ocupação: ${Math.round(perc)}% (cap ${cap}%) • Concorrência: ${activeActs.length}</div>${rows}`;
         tooltip.classList.remove("hidden");
       };
       heat.onmousemove=(ev)=>{ tooltip.style.left = (ev.clientX+12)+"px"; tooltip.style.top = (ev.clientY+12)+"px"; };
@@ -1750,7 +1839,7 @@ document.getElementById("btnExportCSV").onclick = async () => {
     updatedAt: a.updatedAt || 0,
     deletedAt: a.deletedAt || ""
   }));
-  download("recursos.csv", toCSV(rec, ["id","nome","tipo","senioridade","ativo","capacidade","inicioAtivo","fimAtivo","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
+  download("recursos.csv", toCSV(rec, ["id","nome","tipo","senioridade","ativo","capacidade","cargaHorariaDiaria","inicioAtivo","fimAtivo","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
   download("atividades.csv", toCSV(atv, ["id","titulo","resourceId","inicio","fim","status","alocacao", "tags","version","updatedAt","deletedAt"]), "text/csv;charset=utf-8");
   alert("Exportados: recursos.csv e atividades.csv");
 };
@@ -1791,7 +1880,7 @@ document.getElementById("btnExportXLS").onclick = async () => {
     alocacao: a.alocacao || 100,
     tags: (a.tags || []).join(', ')
   }));
-  download("recursos.xls", tableHTML("Recursos", rec, ["id","nome","tipo","senioridade","ativo","capacidade","inicioAtivo","fimAtivo"]), "application/vnd.ms-excel");
+  download("recursos.xls", tableHTML("Recursos", rec, ["id","nome","tipo","senioridade","ativo","capacidade","cargaHorariaDiaria","inicioAtivo","fimAtivo"]), "application/vnd.ms-excel");
   download("atividades.xls", tableHTML("Atividades", atv, ["id","titulo","resourceId","inicio","fim","status","alocacao", "tags"]), "application/vnd.ms-excel");
   alert("Exportados: recursos.xls e atividades.xls");
 };
@@ -1897,6 +1986,7 @@ if(__fileImportEl) __fileImportEl.onchange=(ev)=>{
             senioridade: cols[idx("senioridade")]||"NA",
             ativo: (cols[idx("ativo")]||"true").toLowerCase()!=="false",
             capacidade: Number(cols[idx("capacidade")]||100),
+            cargaHorariaDiaria: Math.max(1, Number((idx("cargaHorariaDiaria") >= 0 ? cols[idx("cargaHorariaDiaria")] : '') || DEFAULT_DAILY_HOURS)),
             inicioAtivo: cols[idx("inicioAtivo")]||"",
             fimAtivo: cols[idx("fimAtivo")]||""
           };
@@ -1978,43 +2068,33 @@ function formatBucketLabel(key, gran){
   return String(key);
 }
 // FUNÇÃO CORRIGIDA
-function renderAggregates(){
+function renderAggregatePercent(filteredActs, days){
   aggCharts.innerHTML="";
   const gran=aggGran.value;
-  const days=buildDays();
-  // Constrói o mapa de recursos a serem exibidos, ignorando recursos inativos ou marcados como excluídos
   const byRes = Object.fromEntries(
     resources
       .filter(r => r.ativo && !r.deletedAt)
       .map(r => [r.id, {}])
   );
-
-  // Pré-calcula o número de dias em cada "bucket" (semana/mês) para evitar contagem duplicada da capacidade
   const daysPerBucket = {};
   days.forEach(d => {
     const key = bucketKey(d, gran);
     if (!daysPerBucket[key]) daysPerBucket[key] = 0;
     daysPerBucket[key]++;
   });
-
-  // Calcula a soma total de alocação (numerador)
-  activities.forEach(a => {
-    // Ignora atividades removidas
+  filteredActs.forEach(a => {
     if (a.deletedAt) return;
-    // Busca o recurso associado, certificando-se que ele está ativo e não excluído
     const r = resources.find(x => x.id === a.resourceId && x.ativo && !x.deletedAt);
     if (!r) return;
     for (let d of days) {
       if (fromYMD(a.inicio) <= d && d <= fromYMD(a.fim)) {
         const key = bucketKey(d, gran);
         const map = byRes[r.id];
-        if (!map[key]) map[key] = { sum: 0, capDays: 0 }; // Inicializa
+        if (!map[key]) map[key] = { sum: 0, capDays: 0 };
         map[key].sum += (a.alocacao || 100);
       }
     }
   });
-
-  // Calcula a capacidade total correta (denominador), contando cada dia apenas uma vez
   Object.keys(byRes).forEach(resourceId => {
     const resource = resources.find(r => r.id === resourceId);
     if (!resource) return;
@@ -2025,19 +2105,12 @@ function renderAggregates(){
       map[key].capDays = numDays * cap;
     });
   });
-  
-  // Renderiza os gráficos
-  resources
-    .filter(r => r.ativo && !r.deletedAt)
-    .forEach(r => {
+  resources.filter(r => r.ativo && !r.deletedAt).forEach(r => {
     const card=document.createElement("div");
     card.className="card";
     const h=document.createElement("h3");
     h.textContent=`${r.nome} — ${gran==="weekly"?"Semanal":"Mensal"}`;
     const canvas=document.createElement("canvas");
-    // Ajuste de eixo X (legendas): mais próximo do gráfico e sem recorte.
-    // Em vez de empurrar as datas muito para baixo e rotacionar, deixamos
-    // a legenda mais próxima e aplicamos "pulo" de rótulos quando há muitos.
     canvas.width=600; canvas.height=180; canvas.className="chart";
     const ctx=canvas.getContext("2d");
     const entries=Object.entries(byRes[r.id]||{});
@@ -2045,7 +2118,7 @@ function renderAggregates(){
     const W=canvas.width, H=canvas.height;
     const marginL = 34;
     const marginT = 12;
-    const marginB = 48; // espaço para legenda sem afastar demais do gráfico
+    const marginB = 48;
     const axisY = H - marginB;
     ctx.clearRect(0,0,W,H);
     ctx.beginPath();
@@ -2054,21 +2127,17 @@ function renderAggregates(){
     ctx.lineTo(W-10, axisY);
     ctx.stroke();
     const barW=Math.max(8, (W - marginL - 20) / Math.max(1, entries.length) - 6);
-    // Se houver muitos pontos, mostramos apenas 1 a cada N rótulos para evitar sobreposição.
     const labelStep = entries.length > 20 ? 3 : (entries.length > 12 ? 2 : 1);
     entries.forEach((kv,idx)=>{
       const key=kv[0]; const v=kv[1];
       const label = formatBucketLabel(key, gran);
       const perc = v.capDays > 0 ? (v.sum / v.capDays) * 100 : 0;
       const x = marginL + 10 + idx*(barW+6);
-      const y = axisY - (Math.min(100, perc)/100)*(axisY - marginT - 18); // Limita a barra em 100% de altura visualmente
-      ctx.fillStyle = perc > 100 ? '#ef4444' : '#2563eb'; // Cor vermelha para sobrecarga
+      const y = axisY - (Math.min(100, perc)/100)*(axisY - marginT - 18);
+      ctx.fillStyle = perc > 100 ? '#ef4444' : '#2563eb';
       ctx.fillRect(x, y, barW, axisY - y);
-      // Legenda do eixo X (datas): mais próxima do eixo e sem recorte.
-      // Para não embolar, exibimos apenas 1 a cada "labelStep" quando necessário.
       if(idx % labelStep === 0){
         ctx.save();
-        // Mantém a legenda próxima do eixo, mas com folga suficiente para não recortar.
         ctx.translate(x + barW/2, axisY + 16);
         ctx.textAlign="center";
         ctx.textBaseline="top";
@@ -2081,6 +2150,77 @@ function renderAggregates(){
     card.appendChild(h); card.appendChild(canvas);
     aggCharts.appendChild(card);
   });
+}
+
+function renderAggregateDailyHours(filteredActs, days){
+  aggCharts.innerHTML = "";
+  const dailyLoadMap = computeResourceDayLoadMap(filteredActs, days);
+  resources.filter(r => r.ativo && !r.deletedAt).forEach(r => {
+    const card=document.createElement("div");
+    card.className="card";
+    const h=document.createElement("h3");
+    h.textContent=`${r.nome} — Carga horária diária`;
+    const subtitle=document.createElement("div");
+    subtitle.className='muted';
+    subtitle.style.fontSize='12px';
+    subtitle.style.marginBottom='6px';
+    subtitle.textContent=`Jornada configurada: ${formatHourValue(getResourceDailyHours(r))}h/dia`;
+    const canvas=document.createElement("canvas");
+    canvas.width=600; canvas.height=220; canvas.className="chart";
+    const ctx=canvas.getContext("2d");
+    const entries = days.map(d => ({ key: toYMD(d), ...(dailyLoadMap[r.id]?.[toYMD(d)] || { jornadaHoras: getResourceDailyHours(r), horasAlocadas: 0, horasDisponiveis: getResourceDailyHours(r), excessoHoras: 0 }) }));
+    const maxHours = Math.max(1, ...entries.map(e => Math.max(e.jornadaHoras, e.horasAlocadas)));
+    const W=canvas.width, H=canvas.height;
+    const marginL = 36;
+    const marginT = 16;
+    const marginB = 48;
+    const axisY = H - marginB;
+    ctx.clearRect(0,0,W,H);
+    ctx.beginPath();
+    ctx.moveTo(marginL, marginT);
+    ctx.lineTo(marginL, axisY);
+    ctx.lineTo(W-10, axisY);
+    ctx.stroke();
+    const chartH = axisY - marginT - 12;
+    const barW=Math.max(3, (W - marginL - 20) / Math.max(1, entries.length) - 2);
+    const labelStep = entries.length > 20 ? 3 : (entries.length > 12 ? 2 : 1);
+    entries.forEach((e, idx)=>{
+      const x = marginL + 8 + idx*(barW+2);
+      const hPx = (Math.min(maxHours, e.horasAlocadas) / maxHours) * chartH;
+      const y = axisY - hPx;
+      ctx.fillStyle = e.excessoHoras > 0 ? '#ef4444' : '#2563eb';
+      ctx.fillRect(x, y, barW, hPx);
+      const refY = axisY - ((e.jornadaHoras / maxHours) * chartH);
+      ctx.beginPath();
+      ctx.moveTo(x, refY);
+      ctx.lineTo(x + barW, refY);
+      ctx.strokeStyle = '#64748b';
+      ctx.stroke();
+      if(idx % labelStep === 0){
+        ctx.save();
+        ctx.translate(x + barW/2, axisY + 16);
+        ctx.textAlign='center';
+        ctx.textBaseline='top';
+        ctx.font='9px sans-serif';
+        ctx.fillStyle = '#0f172a';
+        ctx.fillText(e.key.slice(8,10), 0, 0);
+        ctx.restore();
+      }
+    });
+    card.appendChild(h);
+    card.appendChild(subtitle);
+    card.appendChild(canvas);
+    aggCharts.appendChild(card);
+  });
+}
+
+function renderAggregates(){
+  const filtered = getFilteredActivities();
+  const days=buildDays();
+  if(aggGran){ aggGran.style.display = aggView === 'percent' ? '' : 'none'; }
+  if(aggGranLabel){ aggGranLabel.style.display = aggView === 'percent' ? '' : 'none'; }
+  if(aggView === 'hours') return renderAggregateDailyHours(filtered, days);
+  return renderAggregatePercent(filtered, days);
 }
 
 // ===== Auto-sugestão de Tags =====
@@ -2331,7 +2471,7 @@ function getFilteredReport(){
  */
 function exportFilteredCSV(){
   const data=getFilteredReport();
-  const recRows=data.resources.map(r=>({nome:r.nome, tipo:r.tipo, senioridade:r.senioridade, capacidade:(r.capacidade||100)}));
+  const recRows=data.resources.map(r=>({nome:r.nome, tipo:r.tipo, senioridade:r.senioridade, capacidade:(r.capacidade||100), cargaHorariaDiaria:getResourceDailyHours(r)}));
   const actRows=data.activities.map(a=>({
     titulo:a.titulo,
     recurso:(resources.find(x=>x.id===a.resourceId)?.nome)||'',
@@ -2344,7 +2484,7 @@ function exportFilteredCSV(){
     alert('Nenhum dado encontrado para o filtro aplicado.');
     return;
   }
-  download('recursos_filtrados.csv', toCSV(recRows, ['nome','tipo','senioridade','capacidade']), 'text/csv;charset=utf-8');
+  download('recursos_filtrados.csv', toCSV(recRows, ['nome','tipo','senioridade','capacidade','cargaHorariaDiaria']), 'text/csv;charset=utf-8');
   download('atividades_filtradas.csv', toCSV(actRows, ['titulo','recurso','status','inicio','fim','alocacao']), 'text/csv;charset=utf-8');
   alert('Exportados: recursos_filtrados.csv e atividades_filtradas.csv');
 }
@@ -2480,6 +2620,11 @@ function exportFilteredPDF(){
 // === Registro de eventos para painel de risco e exportações filtradas ===
 document.addEventListener('DOMContentLoaded', () => {
   try {
+    const versionBadge = document.getElementById('appVersionBadge');
+    if (versionBadge) {
+      versionBadge.textContent = APP_META.version;
+      versionBadge.title = `${APP_META.version} • ${APP_META.date}\n${APP_META.notes}`;
+    }
     const riskToggle=document.getElementById('riskOnlyToggle');
     if(riskToggle){ riskToggle.addEventListener('change', () => { renderRiskScores(); }); }
     const btnCsv=document.getElementById('btnExpCSV');
@@ -2620,6 +2765,7 @@ function coerceResource(r){
     tipo: (r.tipo||'').toLowerCase()||'interno',
     senioridade: (r.senioridade||'NA'),
     capacidade: Number(r.capacidade ?? r.Capacidade ?? 100),
+    cargaHorariaDiaria: Math.max(1, Number(r.cargaHorariaDiaria ?? r.CargaHorariaDiaria ?? r.carga_horaria_diaria ?? r.horasDia ?? DEFAULT_DAILY_HOURS)),
     ativo: String(r.ativo||'S').toUpperCase().startsWith('S'),
     // normaliza datas para ISO; se vierem vazias permanecem strings vazias
     inicioAtivo: normalizeDateField(r.inicioAtivo||r.InicioAtivo||r.inicio||''),
@@ -3263,10 +3409,10 @@ async function ensureDirOrAsk(){
 const btnExportModeloXLS = document.getElementById('btnExportModeloXLS');
 if(btnExportModeloXLS){
   btnExportModeloXLS.onclick = () => {
-    const headersRec = ['id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo'];
+    const headersRec = ['id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo'];
     const headersAtv = ['id','titulo','resourceId','inicio','fim','status','alocacao', 'tags'];
     const headersHoras = ['id','date','minutos','tipo','projeto'];
-    const exampleRec = [{id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''}];
+    const exampleRec = [{id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''}];
     const exampleAtv = [{id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, tags: 'SAP, Manutenção'}];
     const exampleHoras = [{id:'R1',date:'2025-01-15',minutos:480,tipo:'trabalho',projeto:'Alca Analitico'}];
     const headersCfg = ['id','horasDia','dias','projetos'];
@@ -3296,9 +3442,9 @@ if(btnExportModeloXLS){
 const btnExportModeloCSV = document.getElementById('btnExportModeloCSV');
 if(btnExportModeloCSV){
   btnExportModeloCSV.onclick = () => {
-    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend'];
+    const headers = ['tabela','id','nome','tipo','senioridade','capacidade','cargaHorariaDiaria','ativo','inicioAtivo','fimAtivo','titulo','resourceId','inicio','fim','status','alocacao','tags','date','minutos','tipoHora','projeto','horasDia','dias','projetos', 'activityId','timestamp','oldInicio','oldFim','newInicio','newFim','justificativa','user', 'legend'];
     const sample = [
-      {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
+      {tabela:'recurso',id:'R1',nome:'Recurso Exemplo',tipo:'interno',senioridade:'Pl',capacidade:100,cargaHorariaDiaria:9,ativo:'S',inicioAtivo:'2025-01-01',fimAtivo:''},
       {tabela:'atividade',id:'A1',titulo:'Atividade Exemplo',resourceId:'R1',inicio:'2025-01-10',fim:'2025-01-20',status:'planejada',alocacao:100, tags: 'SAP, Manutenção'},
       {tabela:'hora_externo',id:'R1',date:'2025-01-15',minutos:480,tipoHora:'trabalho',projeto:'Alca Analitico'},
       {tabela:'hora_cfg',id:'R1',horasDia:'08:00',dias:'seg,ter,qua,qui,sex',projetos:'Alca Analitico:300:00'},
